@@ -1,0 +1,10 @@
+# Cached wiki responses. Regenerated on demand, and they are only a local
+# courtesy to a free community resource — never something to ship.
+.cache/
+
+# Batch output: one row per film in *your* Radarr library. Personal, and
+# meaningless to anyone else.
+results.json
+
+__pycache__/
+*.pyc
