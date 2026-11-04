@@ -824,6 +824,27 @@ class WikiClientHttpLayerShouldBuildARequestMediaWikiWillAcceptAndBeAGoodCitizen
         self.assertIn("srsearch=Videodrome", request.full_url)
         self.assertEqual(request.get_header("User-agent"), client.user_agent)
 
+    def test_a_non_json_or_empty_body_raises_wikiresponseerror(self):
+        # An HTML error/challenge page served with HTTP 200, an empty body,
+        # or bytes that are not UTF-8 must surface as a wiki-response
+        # failure batch mode can skip, not as a raw decode crash.
+        client = WikiClient(self.cache)
+        for body in (b"<!DOCTYPE html><html><body>Just a moment...</body></html>", b"", b"\xff\xfe{"):
+            with self.subTest(body=body):
+                class FakeResponse:
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *exc):
+                        return False
+
+                    def read(self, body=body):
+                        return body
+
+                with patch("dub_check.urllib.request.urlopen", return_value=FakeResponse()):
+                    with self.assertRaises(WikiResponseError):
+                        client._http_get_json_uncached({"action": "query", "srsearch": "Videodrome"})
+
 
 class ReadRadarrApiKeyShouldReadItFromConfigXmlAtRuntimeNeverHardcoded(unittest.TestCase):
     def setUp(self):

@@ -637,7 +637,11 @@ class WikiClient:
         url = self.base_url + "?" + urllib.parse.urlencode(params)
         request = urllib.request.Request(url, headers={"User-Agent": self.user_agent})
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            body = response.read()
+        try:
+            return json.loads(body.decode("utf-8"))
+        except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError
+            raise WikiResponseError(f"wiki returned a non-JSON body ({len(body)} bytes)") from exc
 
     def _http_get_json(self, params: dict) -> dict:
         self._throttle()
