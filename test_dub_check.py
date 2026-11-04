@@ -269,6 +269,26 @@ class ParseInfoboxFieldsShouldSurviveBothRealWikiFormattingStyles(unittest.TestC
         self.assertNotIn("titulo_orig", fields)
         self.assertNotIn("año", fields)
 
+    def test_finds_the_film_infobox_when_another_template_comes_first(self):
+        # A hatnote / maintenance template above the infobox must not make
+        # the page unverifiable.
+        wikitext = (
+            "{{Otros usos|Videodrome (desambiguación)}}\n"
+            "{{Esbozo|fecha=2020}}\n"
+            + FakeWikiWikitextShapes.VIDEODROME
+        )
+        fields = parse_infobox_fields(wikitext)
+        self.assertEqual(fields["titulo_orig"], "Videodrome")
+        self.assertEqual(fields["año"], "1983")
+
+    def test_finds_an_infobox_with_only_numbered_titulo_orig_variants_after_another_template(self):
+        fields = parse_infobox_fields("{{Esbozo}}\n" + FakeWikiWikitextShapes.PAREJA_DISPAREJA)
+        self.assertIn("titulo_orig1", fields)
+
+    def test_a_page_with_no_film_infobox_still_yields_its_first_templates_fields(self):
+        fields = parse_infobox_fields(FakeWikiWikitextShapes.UNRELATED_PERSON_PAGE + "{{Esbozo|fecha=2020}}")
+        self.assertEqual(fields["nombre"], "Pablo Moreno")
+
     def test_returns_an_empty_dict_for_text_with_no_template_at_all(self):
         self.assertEqual(parse_infobox_fields("just some prose, no braces here"), {})
 

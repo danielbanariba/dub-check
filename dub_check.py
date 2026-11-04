@@ -189,15 +189,12 @@ def _split_top_level(segment: str) -> list[str]:
     return parts
 
 
-def parse_infobox_fields(wikitext: str) -> dict[str, str]:
-    """Extract every top-level "|key = value" pair from the first {{...}}
-    template in the wikitext (the film's infobox) into a dict. A page whose
-    first template is not a film infobox (e.g. a voice actor's bio page)
-    simply yields a dict without "titulo_orig"/"año" keys -- callers must
-    treat those as absent, not crash."""
-    start = wikitext.find("{{")
-    if start == -1:
-        return {}
+_TITLE_FIELD_RE = re.compile(r"titulo_orig\d*")
+
+
+def _template_fields(wikitext: str, start: int) -> tuple[dict[str, str], int]:
+    """Fields of the {{...}} template opened at start, and the index just
+    past it."""
     end = _find_matching_close(wikitext, start)
     # _find_matching_close returns an index just past a real "}}" when the
     # template is well-formed, but falls back to len(wikitext) for
@@ -217,7 +214,28 @@ def parse_infobox_fields(wikitext: str) -> dict[str, str]:
             continue  # a bare positional/flag parameter -- not a named field
         key, value = segment.split("=", 1)
         fields[key.strip()] = value.strip()
-    return fields
+    return fields, end
+
+
+def parse_infobox_fields(wikitext: str) -> dict[str, str]:
+    """Extract every top-level "|key = value" pair from the film's infobox
+    into a dict: the first top-level {{...}} template that has a
+    "titulo_orig" (or numbered "titulo_origN") field, since a hatnote or
+    maintenance template ("{{Otros usos|...}}", "{{Esbozo}}") may come
+    before it. A page with no such template (e.g. a voice actor's bio page)
+    yields its first template's fields -- a dict without "titulo_orig"/"año"
+    keys, which callers must treat as absent, not crash on."""
+    first: dict[str, str] | None = None
+    pos = 0
+    while True:
+        start = wikitext.find("{{", pos)
+        if start == -1:
+            return first if first is not None else {}
+        fields, pos = _template_fields(wikitext, start)
+        if any(_TITLE_FIELD_RE.fullmatch(key) for key in fields):
+            return fields
+        if first is None:
+            first = fields
 
 
 # ---------------------------------------------------------------------------
