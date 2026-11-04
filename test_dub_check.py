@@ -300,6 +300,20 @@ class ParseInfoboxFieldsShouldSurviveBothRealWikiFormattingStyles(unittest.TestC
         fields = parse_infobox_fields("{{Esbozo}}\n" + FakeWikiWikitextShapes.PAREJA_DISPAREJA)
         self.assertIn("titulo_orig1", fields)
 
+    def test_a_film_template_in_the_article_body_is_not_taken_as_the_pages_infobox(self):
+        # Only templates at the head of the page can be its infobox. A voice
+        # actor's page that embeds a film template further down, after the
+        # prose, is still not that film's page.
+        wikitext = (
+            FakeWikiWikitextShapes.UNRELATED_PERSON_PAGE
+            + "'''Pablo Moreno''' es un actor de doblaje mexicano.\n\n== Filmografía ==\n"
+            + "{{Infobox|titulo_orig = Murder Death Koreatown|pais = {{Bandera|México}} México|año = 2020}}\n"
+        )
+        self.assertEqual(parse_infobox_fields(wikitext)["nombre"], "Pablo Moreno")
+        verdict = evaluate_film("Murder Death Koreatown", "Murder Death Koreatown", 2020,
+                                lambda term, limit: ["Pablo Moreno"], {"Pablo Moreno": wikitext}.get)
+        self.assertEqual(verdict.status, "NO_ENCONTRADO")
+
     def test_a_page_with_no_film_infobox_still_yields_its_first_templates_fields(self):
         fields = parse_infobox_fields(FakeWikiWikitextShapes.UNRELATED_PERSON_PAGE + "{{Esbozo|fecha=2020}}")
         self.assertEqual(fields["nombre"], "Pablo Moreno")

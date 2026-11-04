@@ -201,6 +201,9 @@ def _split_top_level(segment: str) -> list[str]:
 
 
 _TITLE_FIELD_RE = re.compile(r"titulo_orig\d*")
+# What may separate the templates stacked at the head of a page (hatnotes,
+# maintenance notices, the infobox): whitespace and __BEHAVIOR_SWITCHES__.
+_HEAD_GAP_RE = re.compile(r"(?:\s|__[A-Z]+__)*")
 
 
 def _template_fields(wikitext: str, start: int) -> tuple[dict[str, str], int]:
@@ -233,15 +236,18 @@ def parse_infobox_fields(wikitext: str) -> dict[str, str]:
     into a dict: the first top-level {{...}} template that has a
     "titulo_orig" (or numbered "titulo_origN") field, since a hatnote or
     maintenance template ("{{Otros usos|...}}", "{{Esbozo}}") may come
-    before it. A page with no such template (e.g. a voice actor's bio page)
-    yields its first template's fields -- a dict without "titulo_orig"/"año"
+    before it. Only the templates stacked at the head of the page count: once
+    article text follows a template, a template further down (a film
+    embedded in an actor's filmography) is not this page's infobox. A page
+    with no such template (e.g. a voice actor's bio page) yields its first
+    template's fields -- a dict without "titulo_orig"/"año"
     keys, which callers must treat as absent, not crash on."""
     wikitext = _HTML_COMMENT_RE.sub("", wikitext)  # MediaWiki drops comments before reading fields
     first: dict[str, str] | None = None
     pos = 0
     while True:
         start = wikitext.find("{{", pos)
-        if start == -1:
+        if start == -1 or (first is not None and not _HEAD_GAP_RE.fullmatch(wikitext, pos, start)):
             return first if first is not None else {}
         fields, pos = _template_fields(wikitext, start)
         if any(_TITLE_FIELD_RE.fullmatch(key) for key in fields):
