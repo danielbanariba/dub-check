@@ -109,6 +109,16 @@ class NormalizeTitleShouldMakeTwoSpellingsOfTheSameTitleComparable(unittest.Test
         self.assertTrue(titles_match("Quiet Place", "A Quiet Place", None))
         self.assertTrue(titles_match("An American Werewolf in London", "American Werewolf in London", None))
 
+    def test_decodes_html_entities_the_wiki_may_leave_in_a_field(self):
+        self.assertEqual(normalize_title("Schindler&#39;s List"), normalize_title("Schindler's List"))
+        self.assertEqual(normalize_title("Tom &amp; Jerry"), normalize_title("Tom & Jerry"))
+        self.assertEqual(normalize_title("Amores&nbsp;perros"), "amores perros")
+
+    def test_an_ampersand_compares_equal_to_and(self):
+        self.assertTrue(titles_match("Tom &amp; Jerry", "Tom and Jerry", None))
+        self.assertTrue(titles_match("Fast & Furious", "Fast and Furious", None))
+        self.assertTrue(titles_match("Romeo+Juliet & Co", "Romeo+Juliet & Co", None))
+
     def test_a_word_merely_starting_with_a_or_an_is_not_an_article(self):
         self.assertEqual(normalize_title("Annie Hall", strip_article=True), "annie hall")
         self.assertEqual(normalize_title("Aliens", strip_article=True), "aliens")

@@ -23,6 +23,7 @@ import argparse
 import datetime
 import email.utils
 import hashlib
+import html
 import http.client
 import json
 import os
@@ -81,7 +82,12 @@ def normalize_title(text: str, strip_article: bool = False) -> str:
     dub's infobox keeps a film's leading article. It is opt-in and applied
     on BOTH sides of a comparison by titles_match(), never on its own --
     an exact match should never depend on it.
+
+    HTML entities the wiki leaves in a field ("&amp;", "&#39;", "&nbsp;")
+    are decoded first, and "&" is read as the word "and", so "Tom & Jerry"
+    and "Tom and Jerry" compare equal.
     """
+    text = html.unescape(text).replace("&", " and ")
     decomposed = unicodedata.normalize("NFKD", text)
     without_accents = "".join(c for c in decomposed if not unicodedata.combining(c))
     lowered = without_accents.lower()
