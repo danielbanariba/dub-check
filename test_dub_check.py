@@ -703,6 +703,37 @@ class WikiClientSearchShouldCacheSoARerunNeverRepeatsAnIdenticalRequest(unittest
             client.search("Videodrome", limit=8)
         self.assertEqual(mocked.call_count, 2)
 
+    def test_search_syntax_characters_in_a_title_are_not_sent_as_search_operators(self):
+        # CirrusSearch reads a leading "!" or "-" as NOT, '"' as a phrase,
+        # "*"/"?" as wildcards, "~" as fuzzy/force-search, "word:" as a
+        # keyword filter and uppercase AND/OR/NOT as boolean operators. A
+        # film title containing them must be searched as plain words.
+        cases = [
+            ("!Women Art Revolution", "Women Art Revolution"),
+            ("-1 Day", "1 Day"),
+            ("Mission: Impossible", "Mission Impossible"),
+            ('"Weird" Science', "Weird Science"),
+            ("Alien?", "Alien"),
+            ("Se7en*", "Se7en"),
+            ("~Haunted", "Haunted"),
+            ("intitle:Alien", "intitle Alien"),
+            ("Love AND Monsters", "Love and Monsters"),
+            ("Videodrome", "Videodrome"),
+            ("Don't Look Up", "Don't Look Up"),
+        ]
+        client = WikiClient(self.cache)
+        for raw, expected in cases:
+            with self.subTest(raw=raw):
+                with patch.object(WikiClient, "_http_get_json", return_value={"query": {"search": []}}) as mocked:
+                    client.search(raw, limit=3)
+                self.assertEqual(mocked.call_args.args[0]["srsearch"], expected)
+
+    def test_a_title_with_nothing_searchable_left_returns_no_candidates_without_a_request(self):
+        client = WikiClient(self.cache)
+        with patch.object(WikiClient, "_http_get_json") as mocked:
+            self.assertEqual(client.search("?", limit=3), [])
+        mocked.assert_not_called()
+
     def test_an_api_error_response_raises_and_is_not_cached_as_an_empty_result(self):
         # MediaWiki reports rate limiting / maxlag as an "error" object in an
         # HTTP 200 body, with no "query" key. Treating that as "the search

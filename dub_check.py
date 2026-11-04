@@ -616,6 +616,23 @@ def _api_error_code(data) -> str | None:
     return error.get("code") if isinstance(error, dict) else None
 
 
+# Characters CirrusSearch (the wiki's search engine) reads as query syntax:
+# a leading "!"/"-" negates, '"' quotes a phrase, "*"/"?" are wildcards, "~"
+# forces a search or makes a term fuzzy, "word:" is a keyword filter
+# (intitle:, insource:, ...), and the rest group or combine terms. A film
+# title is searched as plain words, so each becomes a space; the search is
+# only a candidate generator, so losing a punctuation mark costs nothing.
+_SEARCH_SYNTAX_RE = re.compile(r'[!\-"*?~:\\()\[\]{}^|&+<>]')
+_SEARCH_BOOLEAN_RE = re.compile(r"\b(AND|OR|NOT)\b")
+
+
+def _plain_search_query(term: str) -> str:
+    """A film title as a search query with no search-operator meaning."""
+    query = _SEARCH_SYNTAX_RE.sub(" ", term)
+    query = _SEARCH_BOOLEAN_RE.sub(lambda m: m.group(1).lower(), query)
+    return _WHITESPACE_RE.sub(" ", query).strip()
+
+
 class WikiClient:
     """Talks to the doblaje.fandom.com MediaWiki API. Three layers, each
     independently testable:
@@ -674,14 +691,17 @@ class WikiClient:
         """Return candidate page titles for a search term. NEVER treat this
         return value as evidence of anything -- it is the fuzzy, unverified
         input to evaluate_film()/evaluate_candidate(), not an answer."""
-        cache_key = f"{term}::{limit}"
+        query = _plain_search_query(term)
+        if not query:
+            return []  # nothing searchable in the title (e.g. "?")
+        cache_key = f"{query}::{limit}"
         cached = self.cache.get("search", cache_key)
         if cached is not CACHE_MISS:
             return cached
         data = self._http_get_json({
             "action": "query",
             "list": "search",
-            "srsearch": term,
+            "srsearch": query,
             "format": "json",
             "srlimit": limit,
         })
