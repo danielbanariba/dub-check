@@ -344,6 +344,24 @@ class ExtractOriginalTitlesShouldCollectEveryPlainOrNumberedVariant(unittest.Tes
         self.assertIn("구필수는 없다", titles)
         self.assertIn("Goo Pil Soo is Not There", titles)
 
+    def test_several_titles_in_one_field_separated_by_br_are_each_a_candidate(self):
+        fields = {"titulo_orig": "Pengabdi Setan<br />Satan's Slaves <small>(internacional)</small>"}
+        titles = extract_original_titles(fields)
+        self.assertIn("Pengabdi Setan", titles)
+        self.assertIn("Satan's Slaves", titles)
+
+    def test_a_br_separated_alternate_title_verifies_the_page(self):
+        fields = parse_infobox_fields(
+            "{{Infobox|titulo_orig = Shingeki no Kyojin<br>進撃の巨人|pais = {{Bandera|México}} México|año = 2015}}"
+        )
+        result = evaluate_candidate("Ataque a los titanes", fields, "Attack on Titan", "進撃の巨人", 2015, 1)
+        self.assertTrue(result.verified)
+
+    def test_a_title_written_across_a_br_still_matches_as_a_whole(self):
+        # "<br>" is also used as a plain line break inside one long title.
+        fields = {"titulo_orig": "Videodrome:<br>Cuerpos invadidos"}
+        self.assertTrue(titles_match(extract_original_titles(fields)[0], "Videodrome: Cuerpos invadidos", None))
+
     def test_returns_an_empty_list_when_no_variant_is_present_at_all(self):
         fields = parse_infobox_fields(FakeWikiWikitextShapes.UNRELATED_PERSON_PAGE)
         self.assertEqual(extract_original_titles(fields), [])

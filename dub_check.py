@@ -280,6 +280,7 @@ def classify_countries(countries: list[str]) -> str:
 
 _SMALL_SPAN_RE = re.compile(r"<small>.*?</small>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WIKILINK_RE = re.compile(r"\[\[([^\]]*)\]\]")
 _FILE_NAMESPACE_PREFIXES = ("archivo:", "file:", "imagen:", "image:")
 
@@ -344,7 +345,12 @@ def extract_original_titles(fields: dict[str, str]) -> list[str]:
     infobox's fields: the plain "titulo_orig" field when present, plus any
     numbered "titulo_orig1", "titulo_orig2", ... variants, each cleaned of
     wiki markup. Returns an empty list when the page has neither (e.g. a
-    non-film infobox such as a voice actor's bio page)."""
+    non-film infobox such as a voice actor's bio page).
+
+    A field may also hold several titles separated by "<br>" ("Pengabdi
+    Setan<br />Satan's Slaves"), but "<br>" is equally used as a plain line
+    break inside one long title. So the whole cleaned value is kept, and
+    each "<br>"-separated piece is added as a candidate of its own."""
     raw_values = []
     plain = fields.get("titulo_orig")
     if plain:
@@ -353,7 +359,16 @@ def extract_original_titles(fields: dict[str, str]) -> list[str]:
         value = fields.get(f"titulo_orig{n}")
         if value:
             raw_values.append(value)
-    return [strip_wiki_markup(v) for v in raw_values]
+    titles: list[str] = []
+    for raw in raw_values:
+        titles.append(strip_wiki_markup(raw))
+        # <small> annotations go first, so a <br> inside one never turns its
+        # romanization note into a "title" of its own.
+        pieces = [strip_wiki_markup(p) for p in _BR_RE.split(_SMALL_SPAN_RE.sub(" ", raw))]
+        pieces = [p for p in pieces if p]
+        if len(pieces) > 1:
+            titles.extend(pieces)
+    return list(dict.fromkeys(titles))
 
 
 # ---------------------------------------------------------------------------
