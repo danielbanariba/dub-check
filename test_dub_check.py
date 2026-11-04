@@ -278,6 +278,16 @@ class ParseInfoboxFieldsShouldSurviveBothRealWikiFormattingStyles(unittest.TestC
         self.assertNotIn("titulo_orig", fields)
         self.assertNotIn("año", fields)
 
+    def test_a_pipe_inside_a_ref_footnote_is_not_a_field_separator(self):
+        # MediaWiki does not split a template field on a "|" inside <ref>.
+        wikitext = ("{{Infobox|titulo_orig = Videodrome<ref>Título en Canadá | según IMDb | lang=en</ref>"
+                    "|pais = {{Bandera|México}} México|año = 1983<ref name=\"a\" />}}")
+        fields = parse_infobox_fields(wikitext)
+        self.assertEqual(fields["titulo_orig"], "Videodrome<ref>Título en Canadá | según IMDb | lang=en</ref>")
+        self.assertNotIn("lang", fields)
+        self.assertEqual(fields["pais"], "{{Bandera|México}} México")
+        self.assertEqual(fields["año"], '1983<ref name="a" />')
+
     def test_a_commented_out_field_does_not_override_the_real_one(self):
         # MediaWiki drops <!-- comments --> before reading template fields;
         # a commented-out "|año = ..." must not become the field's value.

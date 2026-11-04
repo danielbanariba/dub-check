@@ -170,14 +170,27 @@ def _find_matching_close(text: str, open_pos: int) -> int:
     return n  # unterminated template (malformed wikitext) -- take the rest
 
 
+# A complete <ref>...</ref> or <ref ... /> footnote. MediaWiki does not split
+# a template field on a "|" inside one. Unlike _REF_RE, an unclosed <ref> is
+# not matched here, so it cannot swallow the rest of the infobox.
+_CLOSED_REF_RE = re.compile(r"<ref\b[^>]*/>|<ref\b[^>]*>.*?</ref\s*>", re.IGNORECASE | re.DOTALL)
+
+
 def _split_top_level(segment: str) -> list[str]:
-    """Split on '|' characters that are not nested inside {{ }} or [[ ]]."""
+    """Split on '|' characters that are not nested inside {{ }} or [[ ]],
+    nor inside a <ref> footnote."""
     parts: list[str] = []
     current: list[str] = []
     depth = 0
     i = 0
     n = len(segment)
     while i < n:
+        if segment[i] == "<":
+            ref = _CLOSED_REF_RE.match(segment, i)
+            if ref:
+                current.append(ref.group(0))
+                i = ref.end()
+                continue
         two = segment[i:i + 2]
         if two in ("{{", "[["):
             depth += 1
