@@ -52,12 +52,15 @@ DEFAULT_YEAR_TOLERANCE = 1
 # doblaje.fandom.com writes the dub's country in Spanish, inside a
 # "{{Bandera|<Country>}}" flag template. These are matched after accent- and
 # case-normalization (see normalize_title), so e.g. "México" and "Mexico"
-# are treated the same.
+# are treated the same. "Estados Unidos" is here on purpose: Latin American
+# Spanish dubs recorded in Miami or Los Angeles are credited to it. So is a
+# region-wide "Latinoamérica" credit, should a page use one.
 LATIN_AMERICAN_COUNTRIES = frozenset({
     "mexico", "argentina", "venezuela", "chile", "colombia", "peru",
     "puerto rico", "ecuador", "uruguay", "bolivia", "paraguay",
     "guatemala", "honduras", "el salvador", "nicaragua", "costa rica",
     "panama", "cuba", "republica dominicana",
+    "estados unidos", "latinoamerica",
 })
 SPAIN_NAMES = frozenset({"espana", "spain"})
 

@@ -72,7 +72,7 @@ film's own production country (`origen`) — decides the verdict:
 
 | Verdict | Means | Example |
 |---|---|---|
-| `LATINO` | A verified page credits a Latin American country | México, Argentina, Chile, ... |
+| `LATINO` | A verified page credits a Latin American country | México, Argentina, Chile, ..., Estados Unidos (Miami / Los Angeles dubs), Latinoamérica |
 | `CASTELLANO` | A verified page exists, but only credits Spain | Not what was requested |
 | `NO_ENCONTRADO` | No candidate page could be verified as this film | **Not** proof a dub doesn't exist |
 

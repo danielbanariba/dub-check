@@ -421,6 +421,23 @@ class ExtractAndClassifyCountriesShouldReadTheDubsCountryNotTheFilmsCountry(unit
         # Latino signal just because España is also present.
         self.assertEqual(classify_countries(["mexico", "espana"]), "latino")
 
+    def test_a_dub_credited_to_estados_unidos_is_latino(self):
+        # Latin American Spanish dubs recorded in Miami / Los Angeles are
+        # credited to Estados Unidos on the wiki.
+        countries = extract_countries("{{Bandera|Estados Unidos}} Estados Unidos")
+        self.assertEqual(countries, ["estados unidos"])
+        self.assertEqual(classify_countries(countries), "latino")
+
+    def test_a_dub_credited_to_latinoamerica_is_latino(self):
+        self.assertEqual(classify_countries(extract_countries("{{Bandera|Latinoamérica}} Latinoamérica")), "latino")
+        self.assertEqual(classify_countries(extract_countries("Latinoamérica")), "latino")
+
+    def test_a_film_produced_in_the_us_but_dubbed_in_spain_is_still_castellano(self):
+        # origen is never read: only the dub's own country (pais) counts.
+        fields = parse_infobox_fields("{{Infobox|titulo_orig = X|pais = {{Bandera|España}} España"
+                                      "|origen = {{Bandera|Estados Unidos}} Estados Unidos|año = 2000}}")
+        self.assertEqual(evaluate_candidate("X", fields, "X", "X", 2000, 1).country_class, "castellano")
+
     def test_an_unrecognized_country_alone_is_unknown_not_silently_latino_or_castellano(self):
         self.assertEqual(classify_countries(["narnia"]), "unknown")
 
