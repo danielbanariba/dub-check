@@ -20,6 +20,8 @@ See README.md for the full verification rule and worked examples.
 from __future__ import annotations
 
 import argparse
+import datetime
+import email.utils
 import hashlib
 import http.client
 import json
@@ -602,7 +604,16 @@ class WikiResponseError(Exception):
     """The wiki answered, but not with a usable result (an API "error"
     object such as "ratelimited", or a body of the wrong shape). Never
     cached: caching it would turn a transient failure into a permanent
-    answer."""
+    answer. code is the API error code, when the wiki sent one."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
+
+
+def _api_error_code(data) -> str | None:
+    error = data.get("error") if isinstance(data, dict) else None
+    return error.get("code") if isinstance(error, dict) else None
 
 
 class WikiClient:
@@ -679,7 +690,8 @@ class WikiClient:
         # and must never be cached as such.
         search_results = data.get("query", {}).get("search") if isinstance(data, dict) else None
         if not isinstance(search_results, list) or "error" in data:
-            raise WikiResponseError(f"unusable search response for {term!r}: {str(data)[:200]}")
+            raise WikiResponseError(f"unusable search response for {term!r}: {str(data)[:200]}",
+                                    _api_error_code(data))
         titles = [item["title"] for item in search_results]
         self.cache.set("search", cache_key, titles)
         return titles
@@ -705,7 +717,8 @@ class WikiClient:
             if isinstance(data, dict) and error is None:
                 wikitext = data.get("parse", {}).get("wikitext", {}).get("*")
             if not isinstance(wikitext, str):
-                raise WikiResponseError(f"unusable parse response for {page_title!r}: {str(data)[:200]}")
+                raise WikiResponseError(f"unusable parse response for {page_title!r}: {str(data)[:200]}",
+                                        _api_error_code(data))
         self.cache.set("page", page_title, wikitext)
         return wikitext
 
@@ -860,6 +873,50 @@ def _print_batch_summary(results: dict) -> None:
     print(f"NO_ENCONTRADO (no confirmed page today -- NOT proof one can never exist): {counts['NO_ENCONTRADO']}")
 
 
+# Rate limiting. HTTP 429/503 may carry a Retry-After header, which is
+# honored; MediaWiki's own "ratelimited"/"maxlag" API errors (HTTP 200) and a
+# 429/503 without the header back off exponentially instead. A Retry-After
+# longer than the cap stops the run rather than sleeping for hours: batch
+# mode is resumable, so re-running later picks up the remaining films.
+RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 30.0
+RATE_LIMIT_MAX_BACKOFF_SECONDS = 900.0
+_RATE_LIMIT_HTTP_CODES = (429, 503)
+_RATE_LIMIT_API_CODES = ("ratelimited", "maxlag")
+
+
+def _parse_retry_after(value: str | None) -> float | None:
+    """Seconds to wait from a Retry-After header (delta-seconds or an
+    HTTP-date), or None when absent or unparseable."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    return max(0.0, (when - datetime.datetime.now(datetime.timezone.utc)).total_seconds())
+
+
+def _rate_limit_wait(exc: BaseException, previous_backoff: float) -> tuple[float | None, float]:
+    """(seconds to pause, new backoff state) after a failed film; the pause
+    is None when exc is not a rate-limit signal at all."""
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in _RATE_LIMIT_HTTP_CODES:
+        retry_after = _parse_retry_after(exc.headers.get("Retry-After") if exc.headers is not None else None)
+    elif isinstance(exc, WikiResponseError) and exc.code in _RATE_LIMIT_API_CODES:
+        retry_after = None
+    else:
+        return None, previous_backoff
+    backoff = (min(RATE_LIMIT_MAX_BACKOFF_SECONDS, previous_backoff * 2)
+               if previous_backoff else RATE_LIMIT_INITIAL_BACKOFF_SECONDS)
+    return (retry_after if retry_after is not None else backoff), backoff
+
+
 def cmd_batch(args: argparse.Namespace) -> int:
     api_key = read_radarr_api_key(args.radarr_config)
     movies = fetch_wanted_missing(args.radarr_url, api_key)  # READ-ONLY: GET only, see fetch_wanted_missing
@@ -869,6 +926,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
     results = _load_results(args.out)
     cache = DiskCache(args.cache_dir)
     client = WikiClient(cache, min_interval=args.min_interval)
+    backoff = 0.0
 
     for movie in movies:
         movie_id = str(movie.get("id"))
@@ -891,7 +949,16 @@ def cmd_batch(args: argparse.Namespace) -> int:
             # is not a verdict, and omitting the entry means the next run
             # retries this movie instead of silently treating it as done.
             print(f"WARNING: network error checking {title!r}: {exc} -- left for a future run", file=sys.stderr)
+            wait, backoff = _rate_limit_wait(exc, backoff)
+            if wait is not None:
+                if wait > RATE_LIMIT_MAX_BACKOFF_SECONDS:
+                    print(f"WARNING: the wiki asked to wait {wait:.0f}s before the next request -- stopping "
+                          "here; re-run later to continue with the remaining films", file=sys.stderr)
+                    break
+                print(f"Rate limited by the wiki: waiting {wait:.0f}s before the next film", file=sys.stderr)
+                time.sleep(wait)
             continue
+        backoff = 0.0
 
         if year is None:
             # Checked title-only (a materially weaker guarantee, see README),

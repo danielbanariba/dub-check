@@ -142,6 +142,11 @@ bulk scripted access. This tool is built to stay a good guest:
 - **Rate-limited**: real requests are spaced at least `--min-interval`
   seconds apart (default 1.5s), enforced in-process — never issued in
   parallel.
+- **Backs off when rate-limited**: on HTTP 429/503 batch mode waits as long
+  as the wiki's `Retry-After` header asks; without one (or on MediaWiki's
+  own `ratelimited`/`maxlag` errors) it waits 30s, doubling up to 15 min,
+  and resets after the next success. A `Retry-After` longer than 15 min
+  stops the run instead; re-run later to continue.
 - **Cached on disk** (`.cache/`, one JSON file per query/page, keyed by a
   hash of the request): a re-run — single-film or batch — never re-asks the
   wiki anything it already answered. Even a confirmed-missing page is

@@ -11,6 +11,9 @@ while designing this tool, because the wiki turned out to format its infobox
 two different ways (see FakeWikiWikitextShapes) and a synthetic-only fixture
 would have hidden that.
 """
+import datetime
+import email.message
+import email.utils
 import http.client
 import io
 import json
@@ -46,6 +49,9 @@ from dub_check import (
     WikiResponseError,
     _load_results,
     _save_results,
+    API_BASE,
+    RATE_LIMIT_INITIAL_BACKOFF_SECONDS,
+    RATE_LIMIT_MAX_BACKOFF_SECONDS,
 )
 
 
@@ -1267,6 +1273,7 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
 
         with patch("dub_check.fetch_wanted_missing", return_value=self._movies()), \
              patch.object(WikiClient, "_http_get_json", rate_limited_backend), \
+             patch("dub_check.time.sleep"), \
              redirect_stderr(io.StringIO()):
             self._run_main(self._argv())
 
@@ -1280,6 +1287,88 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
 
         results = json.loads(self.out_path.read_text(encoding="utf-8"))
         self.assertEqual(results["1"]["status"], "LATINO")
+
+
+class MainBatchModeShouldBackOffWhenTheWikiRateLimits(unittest.TestCase):
+    """After a rate limit, batch mode must slow down (honoring Retry-After
+    when the wiki sends one) instead of firing the next film's requests at
+    the normal pace and failing every remaining film the same way."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name)
+        self.out_path = base / "results.json"
+        self.config_path = base / "config.xml"
+        self.config_path.write_text("<Config><ApiKey>fake-key-xyz</ApiKey></Config>", encoding="utf-8")
+        self.argv = ["batch", "--radarr-config", str(self.config_path), "--out", str(self.out_path),
+                     "--cache-dir", str(base / "cache"), "--min-interval", "0"]
+
+    @staticmethod
+    def _movies(*titles):
+        return [{"id": i, "title": t, "originalTitle": t, "year": 2020} for i, t in enumerate(titles, 1)]
+
+    @staticmethod
+    def _http_429(retry_after=None):
+        headers = email.message.Message()
+        if retry_after is not None:
+            headers["Retry-After"] = retry_after
+        return urllib.error.HTTPError(API_BASE, 429, "Too Many Requests", headers, None)
+
+    def _run(self, movies, failures):
+        """failures maps a search term to the exception (or API error body)
+        its search produces; every other film searches cleanly."""
+        def backend(client_self, params):
+            failure = failures.get(params.get("srsearch"))
+            if isinstance(failure, BaseException):
+                raise failure
+            if failure is not None:
+                return failure
+            return fake_wiki_backend(search_results={}, pages={})(client_self, params)
+
+        sleeps = []
+        stderr = io.StringIO()
+        with patch("dub_check.fetch_wanted_missing", return_value=movies), \
+             patch.object(WikiClient, "_http_get_json", backend), \
+             patch("dub_check.time.sleep", side_effect=sleeps.append), \
+             redirect_stdout(io.StringIO()), redirect_stderr(stderr):
+            main(self.argv)
+        results = json.loads(self.out_path.read_text(encoding="utf-8")) if self.out_path.exists() else {}
+        return sleeps, results, stderr.getvalue()
+
+    def test_honors_a_retry_after_in_seconds_then_carries_on_with_the_next_film(self):
+        sleeps, results, _ = self._run(self._movies("A", "B"), {"A": self._http_429("7")})
+        self.assertEqual(sleeps, [7.0])
+        self.assertNotIn("1", results)
+        self.assertIn("2", results)
+
+    def test_honors_a_retry_after_given_as_an_http_date(self):
+        when = email.utils.format_datetime(datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=120), usegmt=True)
+        sleeps, _, _ = self._run(self._movies("A", "B"), {"A": self._http_429(when)})
+        self.assertEqual(len(sleeps), 1)
+        self.assertAlmostEqual(sleeps[0], 120, delta=3)
+
+    def test_backs_off_exponentially_without_retry_after_and_resets_after_a_success(self):
+        rate_limited = {"error": {"code": "ratelimited", "info": "You've exceeded your rate limit."}}
+        sleeps, results, _ = self._run(
+            self._movies("A", "B", "C", "D"),
+            {"A": rate_limited, "B": self._http_429(), "D": rate_limited},
+        )
+        self.assertEqual(sleeps, [RATE_LIMIT_INITIAL_BACKOFF_SECONDS, 2 * RATE_LIMIT_INITIAL_BACKOFF_SECONDS,
+                                  RATE_LIMIT_INITIAL_BACKOFF_SECONDS])
+        self.assertEqual(sorted(results), ["3"])
+
+    def test_stops_the_run_instead_of_hanging_when_retry_after_is_longer_than_the_cap(self):
+        too_long = str(int(RATE_LIMIT_MAX_BACKOFF_SECONDS) + 1)
+        sleeps, results, stderr = self._run(self._movies("A", "B"), {"A": self._http_429(too_long)})
+        self.assertEqual(sleeps, [])
+        self.assertEqual(results, {})  # B was not attempted: the wiki asked for a long pause
+        self.assertIn(too_long, stderr)
+
+    def test_does_not_sleep_after_a_failure_that_is_not_a_rate_limit(self):
+        sleeps, results, _ = self._run(self._movies("A", "B"), {"A": urllib.error.URLError("no route to host")})
+        self.assertEqual(sleeps, [])
+        self.assertIn("2", results)
 
 
 if __name__ == "__main__":
