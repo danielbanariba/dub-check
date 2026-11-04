@@ -23,6 +23,7 @@ import argparse
 import hashlib
 import http.client
 import json
+import os
 import re
 import sys
 import time
@@ -550,6 +551,17 @@ class _MissType:
 CACHE_MISS = _MissType()
 
 
+def _write_json_atomically(path: Path, payload, **dump_kwargs) -> None:
+    """Write JSON to a temporary sibling file, then rename it over path, so
+    a process killed mid-write (the README's own "kill it partway through"
+    workflow) leaves either the old file or the new one, never a truncated
+    file that every later run would crash on."""
+    tmp_path = path.with_name(path.name + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, **dump_kwargs)
+    os.replace(tmp_path, path)
+
+
 class DiskCache:
     """A small JSON-file cache, one file per key, under a namespace
     subdirectory ("search" / "page"). This is what lets a batch run over
@@ -579,9 +591,7 @@ class DiskCache:
         return payload["value"]
 
     def set(self, namespace: str, key: str, value) -> None:
-        path = self._path(namespace, key)
-        with path.open("w", encoding="utf-8") as fh:
-            json.dump({"key": key, "value": value}, fh, ensure_ascii=False, indent=2)
+        _write_json_atomically(self._path(namespace, key), {"key": key, "value": value}, indent=2)
 
 
 # ---------------------------------------------------------------------------

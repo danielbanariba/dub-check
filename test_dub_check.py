@@ -648,6 +648,22 @@ class DiskCacheShouldPersistResultsAcrossRunsSoAReRunDoesNotReAsk(unittest.TestC
         reopened = DiskCache(self.root)
         self.assertEqual(reopened.get("page", "Videodrome: Cuerpos invadidos"), "{{Infobox|...}}")
 
+    def test_a_write_interrupted_partway_leaves_a_miss_not_a_corrupt_entry(self):
+        # README: "kill the process partway through ... re-running picks up
+        # where it left off". A Ctrl-C landing mid-write must not leave a
+        # truncated JSON file that makes every later run crash on this key.
+        cache = DiskCache(self.root)
+
+        def interrupted_dump(obj, fh, **kwargs):
+            fh.write('{"key": "Videodrome::8", "val')
+            raise KeyboardInterrupt
+
+        with patch("dub_check.json.dump", side_effect=interrupted_dump):
+            with self.assertRaises(KeyboardInterrupt):
+                cache.set("search", "Videodrome::8", ["Videodrome: Cuerpos invadidos"])
+
+        self.assertIs(DiskCache(self.root).get("search", "Videodrome::8"), CACHE_MISS)
+
 
 class WikiClientSearchShouldCacheSoARerunNeverRepeatsAnIdenticalRequest(unittest.TestCase):
     def setUp(self):
