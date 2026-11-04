@@ -680,10 +680,15 @@ class WikiClient:
             "prop": "wikitext",
             "format": "json",
         })
-        if "error" in data:
-            wikitext = None
+        error = data.get("error") if isinstance(data, dict) else None
+        if isinstance(error, dict) and error.get("code") == "missingtitle":
+            wikitext = None  # the only error that really means "no such page"
         else:
-            wikitext = data.get("parse", {}).get("wikitext", {}).get("*")
+            wikitext = None
+            if isinstance(data, dict) and error is None:
+                wikitext = data.get("parse", {}).get("wikitext", {}).get("*")
+            if not isinstance(wikitext, str):
+                raise WikiResponseError(f"unusable parse response for {page_title!r}: {str(data)[:200]}")
         self.cache.set("page", page_title, wikitext)
         return wikitext
 

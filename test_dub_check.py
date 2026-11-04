@@ -717,6 +717,26 @@ class WikiClientGetWikitextShouldCacheAConfirmedMissingPageToo(unittest.TestCase
             client.get_wikitext("Some Page That Does Not Exist")
         mocked.assert_called_once()
 
+    def test_a_rate_limit_error_is_not_cached_as_a_missing_page(self):
+        # Only "missingtitle" means the page does not exist. Any other API
+        # error is transient; caching it as None would make a real dub page
+        # look nonexistent on every future run.
+        client = WikiClient(self.cache)
+        rate_limited = {"error": {"code": "ratelimited", "info": "You've exceeded your rate limit."}}
+        good = {"parse": {"wikitext": {"*": "{{Infobox|titulo_orig = Videodrome}}"}}}
+        with patch.object(WikiClient, "_http_get_json", side_effect=[rate_limited, good]):
+            with self.assertRaises(WikiResponseError):
+                client.get_wikitext("Videodrome: Cuerpos invadidos")
+            wikitext = client.get_wikitext("Videodrome: Cuerpos invadidos")
+        self.assertEqual(wikitext, "{{Infobox|titulo_orig = Videodrome}}")
+
+    def test_a_response_with_no_wikitext_raises_instead_of_meaning_a_missing_page(self):
+        client = WikiClient(self.cache)
+        with patch.object(WikiClient, "_http_get_json", return_value={"batchcomplete": ""}):
+            with self.assertRaises(WikiResponseError):
+                client.get_wikitext("Videodrome: Cuerpos invadidos")
+        self.assertIs(self.cache.get("page", "Videodrome: Cuerpos invadidos"), CACHE_MISS)
+
 
 class WikiClientShouldThrottleRealRequestsButNeverThrottleCacheHits(unittest.TestCase):
     def setUp(self):
