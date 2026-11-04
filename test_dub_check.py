@@ -388,6 +388,19 @@ class StripWikiMarkupShouldLeaveOnlyHumanReadableText(unittest.TestCase):
         raw = "{{Bandera|Corea del Sur}} 구필수는 없다 <br><small>''(gupilsuneun eobsda)''</small>"
         self.assertEqual(strip_wiki_markup(raw), "구필수는 없다")
 
+    def test_removes_a_ref_footnote_including_its_content(self):
+        # A footnote cites a source; its text is never part of the title.
+        self.assertEqual(strip_wiki_markup("Videodrome<ref>Título en Canadá | según IMDb</ref>"), "Videodrome")
+        self.assertEqual(strip_wiki_markup('Videodrome<ref name="imdb" />'), "Videodrome")
+
+    def test_a_titulo_orig_with_a_ref_footnote_still_verifies_the_page(self):
+        pages = {"Videodrome: Cuerpos invadidos": (
+            "{{Infobox|titulo_orig = Videodrome<ref>Título en Canadá | según IMDb</ref>"
+            "|pais = {{Bandera|México}} México|año = 1983}}")}
+        verdict = evaluate_film("Videodrome", "Videodrome", 1983,
+                                lambda term, limit: ["Videodrome: Cuerpos invadidos"], pages.get)
+        self.assertEqual(verdict.status, "LATINO")
+
     def test_an_empty_value_stays_empty(self):
         self.assertEqual(strip_wiki_markup(""), "")
 

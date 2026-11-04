@@ -351,6 +351,8 @@ def strip_wiki_markup(text: str) -> str:
       every real example seen while building this tool uses <small> for a
       SECONDARY annotation, never the title itself -- a romanization note
       ("(gupilsuneun eobsda)") or a version label ("(doblaje original)").
+    - <ref> footnotes are removed WHOLE as well: they cite a source and are
+      never part of the title.
     - {{templates}} (flag icons) are removed entirely.
     - [[Archivo:...|options|caption]] image embeds are removed entirely
       (verified live on "Pareja dispareja"'s titulo_orig2), but a genuine
@@ -359,7 +361,7 @@ def strip_wiki_markup(text: str) -> str:
     """
     if not text:
         return text
-    without_small = _SMALL_SPAN_RE.sub(" ", text)
+    without_small = _SMALL_SPAN_RE.sub(" ", _REF_RE.sub(" ", text))
 
     # Strip {{templates}}, tracking nesting depth the same way infobox
     # parsing does (a flag template is never nested here in practice, but
