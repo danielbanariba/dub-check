@@ -16,7 +16,7 @@ import json
 import tempfile
 import unittest
 import urllib.error
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -42,6 +42,7 @@ from dub_check import (
     DEFAULT_RADARR_CONFIG,
     strip_wiki_markup,
     extract_original_titles,
+    WikiResponseError,
 )
 
 
@@ -665,6 +666,28 @@ class WikiClientSearchShouldCacheSoARerunNeverRepeatsAnIdenticalRequest(unittest
             client.search("Videodrome", limit=8)
         self.assertEqual(mocked.call_count, 2)
 
+    def test_an_api_error_response_raises_and_is_not_cached_as_an_empty_result(self):
+        # MediaWiki reports rate limiting / maxlag as an "error" object in an
+        # HTTP 200 body, with no "query" key. Treating that as "the search
+        # found nothing" and caching it would make the film NO_ENCONTRADO
+        # forever, on every future run.
+        client = WikiClient(self.cache)
+        rate_limited = {"error": {"code": "ratelimited", "info": "You've exceeded your rate limit."}}
+        good = {"query": {"search": [{"title": "Videodrome: Cuerpos invadidos"}]}}
+        with patch.object(WikiClient, "_http_get_json", side_effect=[rate_limited, good]) as mocked:
+            with self.assertRaises(WikiResponseError):
+                client.search("Videodrome", limit=3)
+            titles = client.search("Videodrome", limit=3)
+        self.assertEqual(titles, ["Videodrome: Cuerpos invadidos"])
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_a_response_with_no_search_list_raises_instead_of_meaning_zero_hits(self):
+        client = WikiClient(self.cache)
+        with patch.object(WikiClient, "_http_get_json", return_value={"batchcomplete": ""}):
+            with self.assertRaises(WikiResponseError):
+                client.search("Videodrome", limit=3)
+        self.assertIs(self.cache.get("search", "Videodrome::3"), CACHE_MISS)
+
 
 class WikiClientGetWikitextShouldCacheAConfirmedMissingPageToo(unittest.TestCase):
     def setUp(self):
@@ -1097,6 +1120,31 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         self.assertNotIn("1", results)  # left in place for a future retry
         self.assertIn("2", results)
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
+
+    def test_a_rate_limited_search_is_not_recorded_as_no_encontrado(self):
+        # A rate-limit error must leave the movie out of results.json (so a
+        # later run retries it), not record a false NO_ENCONTRADO that the
+        # resumable batch would then never revisit.
+        def rate_limited_backend(self, params):
+            if params.get("srsearch") == "Videodrome":
+                return {"error": {"code": "ratelimited", "info": "You've exceeded your rate limit."}}
+            return fake_wiki_backend(search_results={}, pages={})(self, params)
+
+        with patch("dub_check.fetch_wanted_missing", return_value=self._movies()), \
+             patch.object(WikiClient, "_http_get_json", rate_limited_backend), \
+             redirect_stderr(io.StringIO()):
+            self._run_main(self._argv())
+
+        results = json.loads(self.out_path.read_text(encoding="utf-8"))
+        self.assertNotIn("1", results)
+        self.assertIn("2", results)
+
+        with patch("dub_check.fetch_wanted_missing", return_value=self._movies()), \
+             patch.object(WikiClient, "_http_get_json", self.videodrome_backend):
+            self._run_main(self._argv())
+
+        results = json.loads(self.out_path.read_text(encoding="utf-8"))
+        self.assertEqual(results["1"]["status"], "LATINO")
 
 
 if __name__ == "__main__":

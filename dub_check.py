@@ -585,6 +585,13 @@ class DiskCache:
 # Wiki HTTP client
 # ---------------------------------------------------------------------------
 
+class WikiResponseError(Exception):
+    """The wiki answered, but not with a usable result (an API "error"
+    object such as "ratelimited", or a body of the wrong shape). Never
+    cached: caching it would turn a transient failure into a permanent
+    answer."""
+
+
 class WikiClient:
     """Talks to the doblaje.fandom.com MediaWiki API. Three layers, each
     independently testable:
@@ -650,7 +657,13 @@ class WikiClient:
             "format": "json",
             "srlimit": limit,
         })
-        titles = [item["title"] for item in data.get("query", {}).get("search", [])]
+        # An API-level error (rate limit, maxlag, ...) comes back as HTTP 200
+        # with an "error" object and no search list. That is not "zero hits"
+        # and must never be cached as such.
+        search_results = data.get("query", {}).get("search") if isinstance(data, dict) else None
+        if not isinstance(search_results, list) or "error" in data:
+            raise WikiResponseError(f"unusable search response for {term!r}: {str(data)[:200]}")
+        titles = [item["title"] for item in search_results]
         self.cache.set("search", cache_key, titles)
         return titles
 
@@ -846,7 +859,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
         year = movie.get("year")
         try:
             verdict = evaluate_film(title, original_title, year, client.search, client.get_wikitext)
-        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        except (urllib.error.URLError, urllib.error.HTTPError, WikiResponseError) as exc:
             # Left out of `results` on purpose: a transient network failure
             # is not a verdict, and omitting the entry means the next run
             # retries this movie instead of silently treating it as done.
