@@ -110,12 +110,20 @@ def normalize_title(text: str, strip_article: bool = False) -> str:
 # cannot be mistaken for a film year).
 _YEAR_RE = re.compile(r"(?<!\d)(1[89]\d{2}|20\d{2})(?!\d)")
 
+# Editor comments and footnotes are not part of the field's value, but they
+# routinely mention other years ("<!-- remake of the 1982 film -->",
+# "<ref>...1982...</ref>"). An unterminated one runs to the end of the text,
+# as MediaWiki treats it.
+_HTML_COMMENT_RE = re.compile(r"<!--.*?(?:-->|\Z)", re.DOTALL)
+_REF_RE = re.compile(r"<ref\b[^>]*/>|<ref\b[^>]*>.*?(?:</ref\s*>|\Z)", re.IGNORECASE | re.DOTALL)
+
 
 def extract_years(raw: str) -> set[int]:
     """Pull every plausible film year out of a messy infobox "año" value,
     e.g. "2017<br />2018 <small>(México)</small>" -> {2017, 2018}."""
     if not raw:
         return set()
+    raw = _REF_RE.sub(" ", _HTML_COMMENT_RE.sub(" ", raw))
     return {int(y) for y in _YEAR_RE.findall(raw)}
 
 
@@ -225,6 +233,7 @@ def parse_infobox_fields(wikitext: str) -> dict[str, str]:
     before it. A page with no such template (e.g. a voice actor's bio page)
     yields its first template's fields -- a dict without "titulo_orig"/"año"
     keys, which callers must treat as absent, not crash on."""
+    wikitext = _HTML_COMMENT_RE.sub("", wikitext)  # MediaWiki drops comments before reading fields
     first: dict[str, str] | None = None
     pos = 0
     while True:

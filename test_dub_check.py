@@ -146,6 +146,15 @@ class ExtractYearsShouldFindEveryPlausibleFilmYearInMessyText(unittest.TestCase)
         # mistaken for an embedded year.
         self.assertEqual(extract_years("id 20171234567"), set())
 
+    def test_ignores_years_inside_html_comments(self):
+        self.assertEqual(extract_years("2011 <!-- precuela de la película de 1982 -->"), {2011})
+        self.assertEqual(extract_years("2011 <!-- unterminated 1982"), {2011})
+
+    def test_ignores_years_inside_ref_footnotes(self):
+        self.assertEqual(extract_years("2011<ref>Estreno de la versión de 1982 en México</ref>"), {2011})
+        self.assertEqual(extract_years('2011<ref name="imdb1982">IMDb</ref>'), {2011})
+        self.assertEqual(extract_years('2011<ref name="imdb1982" />'), {2011})
+
     def test_returns_an_empty_set_for_text_with_no_year(self):
         self.assertEqual(extract_years(""), set())
         self.assertEqual(extract_years("sin fecha"), set())
@@ -268,6 +277,12 @@ class ParseInfoboxFieldsShouldSurviveBothRealWikiFormattingStyles(unittest.TestC
         fields = parse_infobox_fields(FakeWikiWikitextShapes.UNRELATED_PERSON_PAGE)
         self.assertNotIn("titulo_orig", fields)
         self.assertNotIn("año", fields)
+
+    def test_a_commented_out_field_does_not_override_the_real_one(self):
+        # MediaWiki drops <!-- comments --> before reading template fields;
+        # a commented-out "|año = ..." must not become the field's value.
+        fields = parse_infobox_fields("{{Infobox|titulo_orig = The Thing|año = 2011 <!-- |año = 1982 -->}}")
+        self.assertEqual(fields["año"], "2011")
 
     def test_finds_the_film_infobox_when_another_template_comes_first(self):
         # A hatnote / maintenance template above the infobox must not make
@@ -561,6 +576,14 @@ class EvaluateFilmShouldNeverTrustASearchHitWithoutOpeningAndVerifyingThePage(un
 
         self.assertEqual(verdict.status, "NO_ENCONTRADO")
         self.assertIsNone(verdict.page_title)
+
+    def test_a_year_mentioned_only_in_a_comment_does_not_verify_a_same_name_remake(self):
+        # The 2011 "The Thing" page must not verify as the 1982 film just
+        # because an editor's comment in its año field mentions 1982.
+        pages = {"La cosa (2011)": "{{Infobox|titulo_orig = The Thing|pais = {{Bandera|México}} México"
+                                   "|año = 2011 <!-- precuela de la película de 1982 -->}}"}
+        verdict = evaluate_film("The Thing", "The Thing", 1982, lambda term, limit: ["La cosa (2011)"], pages.get)
+        self.assertEqual(verdict.status, "NO_ENCONTRADO")
 
     def test_a_search_returning_zero_hits_is_also_no_encontrado(self):
         verdict = evaluate_film("Some Obscure Film", "Some Obscure Film", 2020, lambda term, limit: [], lambda title: None)
