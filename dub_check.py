@@ -878,6 +878,8 @@ def cmd_batch(args: argparse.Namespace) -> int:
         title = movie.get("title")
         original_title = movie.get("originalTitle")
         year = movie.get("year")
+        if not isinstance(year, int) or year <= 0:
+            year = None  # Radarr reports 0 for a year it does not know yet -- not a year to match
         try:
             verdict = evaluate_film(title, original_title, year, client.search, client.get_wikitext)
         except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
@@ -889,6 +891,14 @@ def cmd_batch(args: argparse.Namespace) -> int:
             # is not a verdict, and omitting the entry means the next run
             # retries this movie instead of silently treating it as done.
             print(f"WARNING: network error checking {title!r}: {exc} -- left for a future run", file=sys.stderr)
+            continue
+
+        if year is None:
+            # Checked title-only (a materially weaker guarantee, see README),
+            # so shown but not saved: the next run retries it, by which time
+            # Radarr may know the year.
+            print(f"{title} (year unknown): {verdict.status} -- title-only check, not saved; "
+                  "will be retried on a future run")
             continue
 
         results[movie_id] = {

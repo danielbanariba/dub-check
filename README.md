@@ -119,6 +119,10 @@ skipped on the next run — kill the process partway through ~112 movies and
 re-running picks up where it left off, at no cost to the wiki. Pass
 `--force` to re-check everything anyway.
 
+A movie whose year Radarr does not know yet (it reports `0`) is checked
+title-only and printed, but **not saved**, so a later run retries it once
+Radarr has the year.
+
 ## Radarr access
 
 Read-only: the only Radarr call this tool makes is

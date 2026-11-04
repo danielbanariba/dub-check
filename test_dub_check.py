@@ -1219,6 +1219,27 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
                 self.assertNotIn("1", results)
                 self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
 
+    def test_a_movie_with_radarr_year_0_is_treated_as_unknown_and_left_for_a_future_run(self):
+        # Radarr reports year 0 when it does not know a film's year yet.
+        # Checking "año contains 0" can never match, so the film used to be
+        # saved as NO_ENCONTRADO and, batch mode being resumable, never
+        # looked at again even after Radarr learned the year.
+        for unknown_year in (0, None):
+            with self.subTest(year=unknown_year):
+                self.out_path.unlink(missing_ok=True)
+                movies = [{"id": 1, "title": "Videodrome", "originalTitle": "Videodrome", "year": unknown_year}]
+                out = io.StringIO()
+                with patch("dub_check.fetch_wanted_missing", return_value=movies), \
+                     patch.object(WikiClient, "_http_get_json", self.videodrome_backend), \
+                     redirect_stdout(out), redirect_stderr(io.StringIO()):
+                    main(self._argv())
+
+                results = json.loads(self.out_path.read_text(encoding="utf-8")) if self.out_path.exists() else {}
+                self.assertNotIn("1", results)
+                self.assertNotIn("year 0", out.getvalue())
+                # Checked title-only (like single mode without --year), shown, not saved.
+                self.assertIn("LATINO", out.getvalue())
+
     def test_a_results_write_interrupted_partway_keeps_the_previous_results_file_readable(self):
         # results.json is rewritten after every movie. A Ctrl-C mid-write
         # must not leave a truncated file that makes every later batch run
