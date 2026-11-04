@@ -862,10 +862,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# Every way a wiki request can fail without that being an answer. urllib only
+# wraps connect-phase failures in URLError; a read timeout or a dropped
+# connection arrives unwrapped as TimeoutError / ConnectionError /
+# HTTPException.
+_WIKI_FAILURES = (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
+                  http.client.HTTPException, WikiResponseError)
+
+
 def cmd_single(args: argparse.Namespace) -> int:
     cache = DiskCache(args.cache_dir)
     client = WikiClient(cache, min_interval=args.min_interval)
-    verdict = evaluate_film(args.title, args.original_title, args.year, client.search, client.get_wikitext)
+    try:
+        verdict = evaluate_film(args.title, args.original_title, args.year, client.search, client.get_wikitext)
+    except _WIKI_FAILURES as exc:
+        print(f"ERROR: could not check {args.title!r} on doblaje.fandom.com: {exc}\n"
+              "No verdict: this is a failed request, not an answer. Try again later.", file=sys.stderr)
+        return 1
     print(format_verdict(args.title, args.year, verdict))
     return 0
 
@@ -960,11 +973,7 @@ def cmd_batch(args: argparse.Namespace) -> int:
             year = None  # Radarr reports 0 for a year it does not know yet -- not a year to match
         try:
             verdict = evaluate_film(title, original_title, year, client.search, client.get_wikitext)
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
-                http.client.HTTPException, WikiResponseError) as exc:
-            # TimeoutError / ConnectionError / HTTPException are listed
-            # because urllib only wraps connect-phase failures in URLError;
-            # a read timeout or a dropped connection arrives unwrapped.
+        except _WIKI_FAILURES as exc:
             # Left out of `results` on purpose: a transient network failure
             # is not a verdict, and omitting the entry means the next run
             # retries this movie instead of silently treating it as done.

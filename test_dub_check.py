@@ -1120,6 +1120,30 @@ class MainSingleModeShouldPrintAHumanReadableVerdictWithoutTouchingRadarr(unitte
         self.assertEqual(exit_code, 0)
         self.assertIn("NO_ENCONTRADO", out.getvalue())
 
+    def test_a_network_failure_prints_a_clear_message_and_no_verdict_instead_of_a_traceback(self):
+        failures = [
+            urllib.error.URLError("[Errno -3] Temporary failure in name resolution"),
+            TimeoutError("timed out"),
+            http.client.RemoteDisconnected("Remote end closed connection without response"),
+            WikiResponseError("unusable search response", "ratelimited"),
+        ]
+        for exc in failures:
+            with self.subTest(exc=type(exc).__name__):
+                def failing_backend(self, params, exc=exc):
+                    raise exc
+
+                argv = ["single", "Videodrome", "--year", "1983",
+                        "--cache-dir", str(self.cache_dir), "--min-interval", "0"]
+                out, err = io.StringIO(), io.StringIO()
+                with patch.object(WikiClient, "_http_get_json", failing_backend):
+                    with redirect_stdout(out), redirect_stderr(err):
+                        exit_code = main(argv)  # must not raise
+                self.assertEqual(exit_code, 1)
+                self.assertNotIn("Verdict", out.getvalue())  # no answer is better than a wrong one
+                self.assertIn("could not check", err.getvalue())
+                self.assertIn("doblaje.fandom.com", err.getvalue())
+                self.assertNotIn("Traceback", err.getvalue())
+
 
 class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
     def setUp(self):
