@@ -5,6 +5,7 @@
 # Batch output: one row per film in *your* Radarr library. Personal, and
 # meaningless to anyone else.
 results.json
+results.json.tmp
 
 __pycache__/
 *.pyc

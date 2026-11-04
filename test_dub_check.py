@@ -44,6 +44,8 @@ from dub_check import (
     strip_wiki_markup,
     extract_original_titles,
     WikiResponseError,
+    _load_results,
+    _save_results,
 )
 
 
@@ -1216,6 +1218,22 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
                 results = json.loads(self.out_path.read_text(encoding="utf-8"))
                 self.assertNotIn("1", results)
                 self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
+
+    def test_a_results_write_interrupted_partway_keeps_the_previous_results_file_readable(self):
+        # results.json is rewritten after every movie. A Ctrl-C mid-write
+        # must not leave a truncated file that makes every later batch run
+        # crash in _load_results (and lose all progress made so far).
+        _save_results(self.out_path, {"1": {"title": "Videodrome", "status": "LATINO"}})
+
+        def interrupted_dump(obj, fh, **kwargs):
+            fh.write('{"1": {"title": "Vid')
+            raise KeyboardInterrupt
+
+        with patch("dub_check.json.dump", side_effect=interrupted_dump):
+            with self.assertRaises(KeyboardInterrupt):
+                _save_results(self.out_path, {"1": {"title": "Videodrome", "status": "LATINO"}, "2": {}})
+
+        self.assertEqual(_load_results(self.out_path), {"1": {"title": "Videodrome", "status": "LATINO"}})
 
     def test_a_rate_limited_search_is_not_recorded_as_no_encontrado(self):
         # A rate-limit error must leave the movie out of results.json (so a

@@ -846,8 +846,7 @@ def _load_results(path: Path) -> dict:
 
 def _save_results(path: Path, results: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as fh:
-        json.dump(results, fh, ensure_ascii=False, indent=2, sort_keys=True)
+    _write_json_atomically(path, results, indent=2, sort_keys=True)
 
 
 def _print_batch_summary(results: dict) -> None:
