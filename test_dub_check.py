@@ -102,6 +102,17 @@ class NormalizeTitleShouldMakeTwoSpellingsOfTheSameTitleComparable(unittest.Test
         self.assertEqual(normalize_title("The Evil Dead", strip_article=True), "evil dead")
         self.assertEqual(normalize_title("La Casa del Diablo", strip_article=True), "casa del diablo")
 
+    def test_strips_a_leading_english_a_or_an_when_requested(self):
+        self.assertEqual(normalize_title("A Quiet Place", strip_article=True), "quiet place")
+        self.assertEqual(normalize_title("An American Werewolf in London", strip_article=True),
+                         "american werewolf in london")
+        self.assertTrue(titles_match("Quiet Place", "A Quiet Place", None))
+        self.assertTrue(titles_match("An American Werewolf in London", "American Werewolf in London", None))
+
+    def test_a_word_merely_starting_with_a_or_an_is_not_an_article(self):
+        self.assertEqual(normalize_title("Annie Hall", strip_article=True), "annie hall")
+        self.assertEqual(normalize_title("Aliens", strip_article=True), "aliens")
+
     def test_does_not_strip_an_article_that_is_not_at_the_very_start(self):
         self.assertEqual(normalize_title("Return of the Living Dead", strip_article=True), "return of the living dead")
 

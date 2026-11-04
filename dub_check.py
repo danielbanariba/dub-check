@@ -65,7 +65,7 @@ SPAIN_NAMES = frozenset({"espana", "spain"})
 # Title normalization
 # ---------------------------------------------------------------------------
 
-_LEADING_ARTICLES = ("the", "el", "la", "los", "las", "un", "una", "unos", "unas")
+_LEADING_ARTICLES = ("the", "a", "an", "el", "la", "los", "las", "un", "una", "unos", "unas")
 _PUNCTUATION_RE = re.compile(r"[^\w\s]", flags=re.UNICODE)
 _WHITESPACE_RE = re.compile(r"\s+")
 
