@@ -11,6 +11,7 @@ while designing this tool, because the wiki turned out to format its infobox
 two different ways (see FakeWikiWikitextShapes) and a synthetic-only fixture
 would have hidden that.
 """
+import http.client
 import io
 import json
 import tempfile
@@ -1140,6 +1141,32 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         self.assertNotIn("1", results)  # left in place for a future retry
         self.assertIn("2", results)
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
+
+    def test_a_timeout_or_dropped_connection_for_one_movie_does_not_abort_the_rest_of_the_batch(self):
+        # urllib only wraps connect-phase failures in URLError. A server that
+        # accepts the connection but never answers raises a bare
+        # TimeoutError; a dropped connection raises RemoteDisconnected /
+        # ConnectionResetError; a cut-off body raises IncompleteRead.
+        for exc in (TimeoutError("timed out"),
+                    http.client.RemoteDisconnected("Remote end closed connection without response"),
+                    ConnectionResetError(104, "Connection reset by peer"),
+                    http.client.IncompleteRead(b"{")):
+            with self.subTest(exc=type(exc).__name__):
+                self.out_path.unlink(missing_ok=True)
+
+                def flaky_backend(self, params, exc=exc):
+                    if params.get("srsearch") == "Videodrome":
+                        raise exc
+                    return fake_wiki_backend(search_results={}, pages={})(self, params)
+
+                with patch("dub_check.fetch_wanted_missing", return_value=self._movies()), \
+                     patch.object(WikiClient, "_http_get_json", flaky_backend), \
+                     redirect_stderr(io.StringIO()):
+                    self._run_main(self._argv())
+
+                results = json.loads(self.out_path.read_text(encoding="utf-8"))
+                self.assertNotIn("1", results)
+                self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
 
     def test_a_rate_limited_search_is_not_recorded_as_no_encontrado(self):
         # A rate-limit error must leave the movie out of results.json (so a

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import re
 import sys
@@ -864,7 +865,11 @@ def cmd_batch(args: argparse.Namespace) -> int:
         year = movie.get("year")
         try:
             verdict = evaluate_film(title, original_title, year, client.search, client.get_wikitext)
-        except (urllib.error.URLError, urllib.error.HTTPError, WikiResponseError) as exc:
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
+                http.client.HTTPException, WikiResponseError) as exc:
+            # TimeoutError / ConnectionError / HTTPException are listed
+            # because urllib only wraps connect-phase failures in URLError;
+            # a read timeout or a dropped connection arrives unwrapped.
             # Left out of `results` on purpose: a transient network failure
             # is not a verdict, and omitting the entry means the next run
             # retries this movie instead of silently treating it as done.
