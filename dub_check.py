@@ -362,7 +362,9 @@ def titles_match(candidate_titulo_orig: str | None, title: str | None, original_
     worse, not better."""
     if not candidate_titulo_orig:
         return False
-    targets = [t for t in (original_title, title) if t]
+    if not normalize_title(candidate_titulo_orig):
+        return False  # punctuation only ("—", "?"): no title to compare, and "" == "" is not a match
+    targets =[t for t in (original_title, title) if t]
     for target in targets:
         if normalize_title(candidate_titulo_orig) == normalize_title(target):
             return True

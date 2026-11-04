@@ -372,6 +372,18 @@ class TitlesMatchShouldRequireAnExactNormalizedMatchNeverFuzzySimilarity(unittes
         self.assertFalse(titles_match(None, "Videodrome", "Videodrome"))
         self.assertFalse(titles_match("", "Videodrome", "Videodrome"))
 
+    def test_two_different_punctuation_only_titles_do_not_match(self):
+        # Both normalize to "" -- that is the absence of a title, not an
+        # exact match. A placeholder titulo_orig ("—", "-", "?") must not
+        # verify against a film whose title is itself only punctuation.
+        self.assertFalse(titles_match("—", "?", "?"))
+        self.assertFalse(titles_match("-", "...", None))
+
+    def test_a_placeholder_titulo_orig_does_not_produce_a_false_latino(self):
+        pages = {"Otra película": "{{Infobox|titulo_orig = —|pais = {{Bandera|México}} México|año = 2011}}"}
+        verdict = evaluate_film("?", "?", 2011, lambda term, limit: ["Otra película"], pages.get)
+        self.assertEqual(verdict.status, "NO_ENCONTRADO")
+
 
 class YearMatchesShouldTolerateTheDubYearDifferingFromTheReleaseYear(unittest.TestCase):
     def test_matches_an_exact_year(self):
