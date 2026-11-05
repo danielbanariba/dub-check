@@ -148,13 +148,29 @@ def extract_years(raw: str) -> set[int]:
 # template is treated as a field separator.
 # ---------------------------------------------------------------------------
 
+# A complete <ref>/<nowiki> element, whose content MediaWiki keeps out of
+# template parsing: braces inside one neither open nor close a template.
+# Only a closed element matches, so an unclosed tag cannot swallow the rest
+# of the page.
+_OPAQUE_TAG_RE = re.compile(
+    r"<ref\b[^>]*/>|<ref\b[^>]*>.*?</ref\s*>|<nowiki\s*/>|<nowiki\s*>.*?</nowiki\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
 def _find_matching_close(text: str, open_pos: int) -> int:
     """Return the index just past the '}}' that closes the '{{' template
-    opened at open_pos, accounting for nested {{ }} templates."""
+    opened at open_pos, accounting for nested {{ }} templates and skipping
+    over <ref>/<nowiki> content."""
     depth = 0
     i = open_pos
     n = len(text)
     while i < n:
+        if text[i] == "<":
+            opaque = _OPAQUE_TAG_RE.match(text, i)
+            if opaque:
+                i = opaque.end()
+                continue
         two = text[i:i + 2]
         if two == "{{":
             depth += 1

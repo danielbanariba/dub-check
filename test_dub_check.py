@@ -288,6 +288,22 @@ class ParseInfoboxFieldsShouldSurviveBothRealWikiFormattingStyles(unittest.TestC
         self.assertEqual(fields["pais"], "{{Bandera|México}} México")
         self.assertEqual(fields["año"], '1983<ref name="a" />')
 
+    def test_braces_inside_a_ref_or_nowiki_do_not_close_the_infobox_early(self):
+        # MediaWiki does not read "}}" inside <ref> or <nowiki> as the end of
+        # the template; every field after it must survive.
+        for inner in ("<ref>Ver {{cita|x}} y la nota }} suelta</ref>",
+                      "<nowiki>}}</nowiki>"):
+            with self.subTest(inner=inner):
+                wikitext = ("{{Infobox|titulo_orig = Videodrome" + inner
+                            + "|pais = {{Bandera|México}} México|año = 1983}}")
+                fields = parse_infobox_fields(wikitext)
+                self.assertEqual(fields["pais"], "{{Bandera|México}} México")
+                self.assertEqual(fields["año"], "1983")
+                verdict = evaluate_film("Videodrome", "Videodrome", 1983,
+                                        lambda term, limit: ["Videodrome: Cuerpos invadidos"],
+                                        {"Videodrome: Cuerpos invadidos": wikitext}.get)
+                self.assertEqual(verdict.status, "LATINO")
+
     def test_a_commented_out_field_does_not_override_the_real_one(self):
         # MediaWiki drops <!-- comments --> before reading template fields;
         # a commented-out "|año = ..." must not become the field's value.
