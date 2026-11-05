@@ -288,6 +288,19 @@ class ParseInfoboxFieldsShouldSurviveBothRealWikiFormattingStyles(unittest.TestC
         self.assertEqual(fields["pais"], "{{Bandera|México}} México")
         self.assertEqual(fields["año"], '1983<ref name="a" />')
 
+    def test_a_pipe_or_braces_inside_nowiki_do_not_split_or_merge_fields(self):
+        # <nowiki>|</nowiki> is a literal pipe, not a field separator, and
+        # <nowiki>{{</nowiki> opens no template that would glue the next
+        # field onto this one.
+        fields = parse_infobox_fields(
+            "{{Infobox|titulo_orig = Videodrome <nowiki>|</nowiki> lang=en"
+            "|pais = {{Bandera|México}} México|año = 1983}}")
+        self.assertEqual(fields["titulo_orig"], "Videodrome <nowiki>|</nowiki> lang=en")
+        self.assertNotIn("lang", fields)
+        fields = parse_infobox_fields("{{Infobox|titulo_orig = Videodrome <nowiki>{{</nowiki>|año = 1983}}")
+        self.assertEqual(fields["titulo_orig"], "Videodrome <nowiki>{{</nowiki>")
+        self.assertEqual(fields["año"], "1983")
+
     def test_braces_inside_a_ref_or_nowiki_do_not_close_the_infobox_early(self):
         # MediaWiki does not read "}}" inside <ref> or <nowiki> as the end of
         # the template; every field after it must survive.
