@@ -77,6 +77,7 @@ film's own production country (`origen`) — decides the verdict:
 |---|---|---|
 | `LATINO` | A verified page credits a Latin American country | México, Argentina, Chile, ... |
 | `CASTELLANO` | A verified page exists, but only credits Spain | Not what was requested |
+| `SIN_PAIS` | A verified page documents a dub but credits no country | "Padre de familia", "Twisted Metal" |
 | `NO_ENCONTRADO` | No candidate page could be verified as this film | **Not** proof a dub doesn't exist |
 
 **`NO_ENCONTRADO` is a statement about today's wiki, not a statement about
@@ -115,7 +116,7 @@ python3 dub_check.py batch [--out results.json] [--limit N] [--force]
 
 Batch mode prints a running log, writes `results.json` after **every**
 movie (not just at the end), and finishes with a LATINO / CASTELLANO /
-NO_ENCONTRADO summary count.
+SIN_PAIS / NO_ENCONTRADO summary count.
 
 **Resumable by default.** A movie already present in the results file is
 skipped on the next run — kill the process partway through ~112 movies and

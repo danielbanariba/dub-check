@@ -910,6 +910,12 @@ class FormatVerdictShouldStateHonestlyWhatWasAndWasNotConfirmed(unittest.TestCas
         self.assertIn("LATINO", text)
         self.assertIn("Videodrome: Cuerpos invadidos", text)
 
+    def test_sin_pais_verdict_says_the_page_exists_but_names_no_country(self):
+        text = format_verdict("Twisted Metal", 2023, Verdict("SIN_PAIS", "Twisted Metal", []))
+        self.assertIn("Verdict: SIN_PAIS", text)
+        self.assertIn('page "Twisted Metal"', text)
+        self.assertIn("does not say which country", text)
+
     def test_castellano_verdict_flags_that_this_is_not_the_requested_dub(self):
         verdict = Verdict("CASTELLANO", "Spain Page", [])
         text = format_verdict("Some Film", 1999, verdict)
@@ -1176,6 +1182,19 @@ class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.
                 "|origen = {{Bandera|Reino Unido}} Reino Unido\n|año_emision = 2011-Presente\n}}")
         self.assertEqual(self.verdict("Black Mirror", page, "Black Mirror", 2011), "LATINO")
 
+    TWISTED_METAL = ("{{Infobox\n|titulo = Twisted Metal\n|idioma_orig = {{Bandera|Estados Unidos}} Inglés\n"
+                     "|origen = {{Bandera|Estados Unidos}} Estados Unidos\n|año = 2023-presente\n}}")
+
+    def test_a_page_that_never_names_the_dubs_country_is_sin_pais(self):
+        self.assertEqual(self.verdict("Twisted Metal", self.TWISTED_METAL, "Twisted Metal", 2023), "SIN_PAIS")
+
+    def test_a_page_that_names_the_country_outranks_one_that_does_not(self):
+        spain = "{{Infobox\n|titulo = Twisted Metal\n|pais = {{Bandera|España}} España\n|año = 2023\n}}"
+        pages = {"Twisted Metal": self.TWISTED_METAL, "Twisted Metal (España)": spain}
+        verdict = evaluate_film("Twisted Metal", "Twisted Metal", 2023,
+                                lambda term, limit: list(pages), pages.get)
+        self.assertEqual(verdict.status, "CASTELLANO")
+
     def test_a_parenthesis_inside_one_line_title_is_not_split_off(self):
         page = ("{{Infobox\n|titulo_orig = Birdman (or The Unexpected Virtue of Ignorance)\n"
                 "|pais = {{Bandera|México}} México\n|año = 2014\n}}")
@@ -1243,6 +1262,14 @@ class MainSeriesModeShouldRecordAVerdictPerSonarrSeries(unittest.TestCase):
         self.assertEqual((results["58"]["status"], results["58"]["page_title"], results["58"]["tvdbId"]),
                          ("LATINO", "From", 401003))
         self.assertEqual(results["7"]["status"], "NO_ENCONTRADO")
+
+    def test_an_alternate_title_that_finds_a_page_without_a_country_is_sin_pais(self):
+        page = ("{{Infobox\n|titulo = Sin pais\n|titulo_orig = Kōkaku Kidōtai\n|año = 1995\n}}")
+        results = self.run_series(
+            [{"id": 4, "title": "Ghost in the Shell", "year": 1995,
+              "alternateTitles": [{"title": "Kōkaku Kidōtai"}]}],
+            {"Kōkaku Kidōtai": ["Sin pais"]}, {"Sin pais": page})
+        self.assertEqual(results["4"]["status"], "SIN_PAIS")
 
     def test_an_alternate_title_verifies_a_page_the_title_does_not(self):
         results = self.run_series(

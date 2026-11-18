@@ -491,7 +491,7 @@ def evaluate_candidate(
 
 @dataclass
 class Verdict:
-    status: str  # "LATINO" | "CASTELLANO" | "NO_ENCONTRADO"
+    status: str  # "LATINO" | "CASTELLANO" | "SIN_PAIS" | "NO_ENCONTRADO"
     page_title: str | None
     notes: list[str] = field(default_factory=list)
 
@@ -534,6 +534,7 @@ def evaluate_film(
     seen_pages: set[str] = set()
     notes: list[str] = []
     best: CandidateResult | None = None
+    no_country: CandidateResult | None = None
 
     for term in search_terms:
         for page_title in search_fn(term, search_limit):
@@ -555,6 +556,8 @@ def evaluate_film(
                 return Verdict("LATINO", page_title, notes)
             if result.verified and result.country_class == "castellano" and best is None:
                 best = result
+            if result.verified and result.country_class == "unknown" and no_country is None:
+                no_country = result
 
         # Deliberately NOT breaking here even once a Castellano match is
         # found: CASTELLANO is not the answer Daniel wants, and the next
@@ -564,6 +567,13 @@ def evaluate_film(
 
     if best is not None:
         return Verdict("CASTELLANO", best.page_title, notes)
+    if no_country is not None:
+        # The page is this work's and documents a dub, but credits no
+        # country anywhere this tool reads ("Padre de familia", "Twisted
+        # Metal"). Not a LATINO: that is never guessed. Not NO_ENCONTRADO
+        # either: the page exists, and whoever acts on the verdict may weigh
+        # that differently from no page at all.
+        return Verdict("SIN_PAIS", no_country.page_title, notes)
     return Verdict("NO_ENCONTRADO", None, notes)
 
 
@@ -788,16 +798,17 @@ SERIES_ALTERNATE_TITLES = 5
 def evaluate_series(series: dict, search_fn, fetch_fn) -> Verdict:
     """evaluate_film for a Sonarr series, retried with its alternate titles
     as the original title. The first LATINO wins; otherwise a CASTELLANO
-    found under any of them; otherwise NO_ENCONTRADO."""
+    found under any of them, then a SIN_PAIS; otherwise NO_ENCONTRADO."""
     title = series.get("title")
     alternates = _unique_preserve_order(
         [title] + [a.get("title") or "" for a in series.get("alternateTitles") or []])
+    rank = {"CASTELLANO": 2, "SIN_PAIS": 1, "NO_ENCONTRADO": 0}
     found = None
     for original in alternates[: SERIES_ALTERNATE_TITLES + 1]:
         verdict = evaluate_film(title, original, series.get("year"), search_fn, fetch_fn)
         if verdict.status == "LATINO":
             return verdict
-        if found is None or (verdict.status == "CASTELLANO" and found.status != "CASTELLANO"):
+        if found is None or rank[verdict.status] > rank[found.status]:
             found = verdict
     return found
 
@@ -818,6 +829,12 @@ def format_verdict(title: str, year: int | None, verdict: Verdict) -> str:
         lines.append(
             f'Evidence: a dub was confirmed on doblaje.fandom.com, page "{verdict.page_title}", but it is '
             "credited to Spain (Castellano), not Latin America -- this is NOT the dub that was requested."
+        )
+    elif verdict.status == "SIN_PAIS":
+        lines.append(
+            f'Evidence: page "{verdict.page_title}" on doblaje.fandom.com was verified as this title and '
+            "documents a dub, but does not say which country it was recorded in -- neither LATINO nor "
+            "CASTELLANO can be confirmed from it."
         )
     else:
         lines.append(
@@ -909,13 +926,14 @@ def _save_results(path: Path, results: dict) -> None:
 
 
 def _print_batch_summary(results: dict) -> None:
-    counts = {"LATINO": 0, "CASTELLANO": 0, "NO_ENCONTRADO": 0}
+    counts = {"LATINO": 0, "CASTELLANO": 0, "SIN_PAIS": 0, "NO_ENCONTRADO": 0}
     for entry in results.values():
         counts[entry["status"]] = counts.get(entry["status"], 0) + 1
     print()
     print("=== Summary ===")
     print(f"LATINO       (confirmed Latino dub -- worth hunting):        {counts['LATINO']}")
     print(f"CASTELLANO   (Spain-only dub confirmed -- not what Daniel wants): {counts['CASTELLANO']}")
+    print(f"SIN_PAIS     (a verified page that names no dub country):     {counts['SIN_PAIS']}")
     print(f"NO_ENCONTRADO (no confirmed page today -- NOT proof one can never exist): {counts['NO_ENCONTRADO']}")
 
 
