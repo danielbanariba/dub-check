@@ -53,6 +53,10 @@ LATIN_AMERICAN_COUNTRIES = frozenset({
     "puerto rico", "ecuador", "uruguay", "bolivia", "paraguay",
     "guatemala", "honduras", "el salvador", "nicaragua", "costa rica",
     "panama", "cuba", "republica dominicana",
+    # A Spanish dub recorded in the United States (Los Angeles, Miami) is a
+    # Latin American one; Castilian dubs are recorded in Spain. Real page
+    # "BoJack Horseman": pais = Estados Unidos, California, nothing else.
+    "estados unidos",
 })
 SPAIN_NAMES = frozenset({"espana", "spain"})
 
@@ -185,7 +189,11 @@ def parse_infobox_fields(wikitext: str) -> dict[str, str]:
     first template is not a film infobox (e.g. a voice actor's bio page)
     simply yields a dict without "titulo_orig"/"año" keys -- callers must
     treat those as absent, not crash."""
-    start = wikitext.find("{{")
+    # The infobox is not always the first template: some pages open with a
+    # badge ("South Park": {{Estrella}}{{Infobox ...). Take the first
+    # Infobox, and only fall back to the first template when there is none.
+    infobox = re.search(r"\{\{\s*infobox", wikitext, re.IGNORECASE)
+    start = infobox.start() if infobox else wikitext.find("{{")
     if start == -1:
         return {}
     end = _find_matching_close(wikitext, start)
@@ -228,7 +236,16 @@ def extract_countries(pais_raw: str) -> list[str]:
         return []
     matches = _BANDERA_RE.findall(pais_raw)
     if matches:
-        return [normalize_title(m) for m in matches]
+        # A flag can carry a note in parentheses: a period ("Venezuela
+        # (1954-2006)") or the country of a city or state ("California
+        # (Estados Unidos)"). Both the name and a note with letters count.
+        countries = []
+        for flag in matches:
+            name, _, note = flag.partition("(")
+            countries.append(normalize_title(name))
+            if re.search(r"[^\W\d_]", note):
+                countries.append(normalize_title(note.rstrip(") ")))
+        return countries
     # Fallback for a pais field with no {{Bandera|..}} template (not seen in
     # the pages checked while building this tool, but cheap to handle
     # defensively). Deliberately conservative: stripped markup either
@@ -457,6 +474,12 @@ def evaluate_candidate(
     # instead (real page "El asombroso circo digital": pais1 .. pais6).
     pais_values = [candidate_pais_raw or ""] + [fields.get(f"pais{n}", "") for n in range(1, 11)]
     countries = [c for value in pais_values for c in extract_countries(value)]
+    if not countries:
+        # No pais at all: the flag on the recording date is where the dub
+        # was recorded ("Black Mirror": {{Bandera|Argentina}} Agosto de 2016).
+        # Only a flag counts here, never the date text around it.
+        grabacion = fields.get("fecha_grabacion") or ""
+        countries = extract_countries(grabacion) if _BANDERA_RE.search(grabacion) else []
     country_class = classify_countries(countries)
     year_note = "año not checked (no target year given)" if year_ok is None else f"año matches ({candidate_ano_raw!r})"
     return CandidateResult(

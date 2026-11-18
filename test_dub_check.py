@@ -1149,6 +1149,33 @@ class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.
                 "|pais = {{Bandera|México}} México\n|año = 2019-2026<br /><small>(Japón)</small>\n}}")
         self.assertEqual(self.verdict("Beastars", page, "BEASTARS", 2019), "LATINO")
 
+    def test_a_badge_template_before_the_infobox_is_skipped(self):
+        page = ("{{Estrella}}\u200b<br> {{Infobox\n|titulo = South Park\n"
+                "|pais = {{Bandera|México}} México\n|año = 1997-presente\n}}")
+        self.assertEqual(self.verdict("South Park", page, "South Park", 1997), "LATINO")
+
+    def test_a_flag_dated_in_parentheses_is_still_its_country(self):
+        page = ("{{Infobox\n|titulo = Hellsing\n|titulo_orig = ヘルシング<br><small>(''Herushingu'')</small>\n"
+                "|pais = {{Bandera|Venezuela (1954-2006)}} Venezuela\n|año = 2001-2002\n}}")
+        self.assertEqual(self.verdict("Hellsing", page, "Hellsing", 2001), "LATINO")
+
+    def test_a_dated_spain_flag_is_still_only_spain(self):
+        page = "{{Infobox\n|titulo_orig = Old Film\n|pais = {{Bandera|España (1945-1977)}} España\n|año = 1970\n}}"
+        self.assertEqual(self.verdict("Old Film", page, "Old Film", 1970), "CASTELLANO")
+
+    def test_a_dub_recorded_in_the_united_states_is_latino(self):
+        page = ("{{Infobox\n|titulo = BoJack Horseman\n"
+                "|pais = {{Bandera|Estados Unidos}} {{Bandera|California (Estados Unidos)}}<br />Los Ángeles, California\n"
+                "|origen = {{Bandera|Estados Unidos}} Estados Unidos\n|año = 2014-2020\n}}")
+        self.assertEqual(self.verdict("BoJack Horseman", page, "BoJack Horseman", 2014), "LATINO")
+
+    def test_the_recording_flag_names_the_country_when_pais_is_missing(self):
+        page = ("{{Infobox\n|titulo = Black Mirror\n|titulo_orig = Black Mirror\n"
+                "|idioma_orig = {{Bandera|Reino Unido}} Inglés\n"
+                "|fecha_grabacion = {{Bandera|Argentina}} Agosto de 2016\n"
+                "|origen = {{Bandera|Reino Unido}} Reino Unido\n|año_emision = 2011-Presente\n}}")
+        self.assertEqual(self.verdict("Black Mirror", page, "Black Mirror", 2011), "LATINO")
+
     def test_a_parenthesis_inside_one_line_title_is_not_split_off(self):
         page = ("{{Infobox\n|titulo_orig = Birdman (or The Unexpected Virtue of Ignorance)\n"
                 "|pais = {{Bandera|México}} México\n|año = 2014\n}}")

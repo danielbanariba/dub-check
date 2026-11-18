@@ -148,6 +148,16 @@ below are read:
   ビースターズ, Bīsutāzu). The year is checked against it like any title;
 - the year given only as the years on air, in `año_emision` ("Coraje, el
   perro cobarde");
+- a badge template before the infobox (`{{Estrella}}` on "South Park"): the
+  first `{{Infobox` is read, not the first template;
+- a flag with a note in parentheses, a period ("Venezuela (1954-2006)") or the
+  country of a city ("California (Estados Unidos)"): both count, a period
+  never does;
+- the dub's country only on the recording date's flag, when there is no
+  `pais` ("Black Mirror": `fecha_grabacion = {{Bandera|Argentina}} …`).
+
+A dub recorded in the United States counts as Latin American ("BoJack
+Horseman", recorded in Los Angeles): Castilian dubs are recorded in Spain.
 - the dub's country split over `pais1` … `pais10` when it was recorded in
   several countries ("El asombroso circo digital");
 - a native title with its romanization on the next line, in parentheses
