@@ -1137,6 +1137,18 @@ class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.
     def test_a_romanization_under_the_native_title_is_a_title_too(self):
         self.assertEqual(self.verdict("Gachiakuta", self.GACHIAKUTA, "Gachiakuta", 2025), "LATINO")
 
+    def test_the_year_may_be_given_only_as_the_years_on_air(self):
+        page = ("{{Infobox\n|titulo = Coraje, el perro cobarde\n|titulo_orig = Courage the Cowardly Dog\n"
+                "|pais = {{Bandera|México}} México\n"
+                "|año_emision = 1999-2002<br />2000-2003 <small>(Latinoamérica)</small>\n}}")
+        self.assertEqual(self.verdict("Coraje, el perro cobarde", page, "Courage the Cowardly Dog", 1999),
+                         "LATINO")
+
+    def test_the_pages_own_title_counts_when_the_original_is_a_transliteration(self):
+        page = ("{{Infobox\n|titulo = Beastars\n|titulo_orig = ビースターズ<br />(''Bīsutāzu'')\n"
+                "|pais = {{Bandera|México}} México\n|año = 2019-2026<br /><small>(Japón)</small>\n}}")
+        self.assertEqual(self.verdict("Beastars", page, "BEASTARS", 2019), "LATINO")
+
     def test_a_parenthesis_inside_one_line_title_is_not_split_off(self):
         page = ("{{Infobox\n|titulo_orig = Birdman (or The Unexpected Virtue of Ignorance)\n"
                 "|pais = {{Bandera|México}} México\n|año = 2014\n}}")

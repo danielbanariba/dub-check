@@ -344,11 +344,13 @@ def extract_original_titles(fields: dict[str, str]) -> list[str]:
         value = fields.get(f"titulo_orig{n}")
         if value:
             raw_values.append(value)
-    if not raw_values and "titulo_orig" in fields and fields.get("titulo"):
-        # A series whose Spanish title is its original one leaves
-        # titulo_orig blank (real page "From": titulo = From, titulo_orig
-        # empty). Only a page that has the field at all, so a bio page's
-        # infobox never turns its name into a title.
+    if fields.get("titulo") and ("año" in fields or "año_emision" in fields):
+        # The page's own title, on a page dated like a film or series (a bio
+        # page's infobox has neither field). It is the only spelling left
+        # when titulo_orig is blank ("From") or absent ("Better Call Saul"),
+        # and the one that matches when titulo_orig is a transliteration
+        # the local title never uses ("Beastars": ビースターズ, Bīsutāzu).
+        # The year check below still applies to it like to any title.
         raw_values.append(fields["titulo"])
     titles = []
     for raw in raw_values:
@@ -428,7 +430,9 @@ def evaluate_candidate(
     variants for a film with several alternate international titles -- see
     extract_original_titles) -- a match against ANY one of them counts."""
     candidate_titles = extract_original_titles(fields)
-    candidate_ano_raw = fields.get("año")
+    # Series pages often give only the years on air ("Coraje, el perro
+    # cobarde": año_emision = 1999-2002, no año).
+    candidate_ano_raw = fields.get("año") or fields.get("año_emision")
     candidate_pais_raw = fields.get("pais")
 
     matched_title = next(

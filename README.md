@@ -141,8 +141,13 @@ English title while the wiki keeps the romanization ("Attack on Titan",
 Series pages fill the infobox differently from films, and all three shapes
 below are read:
 
-- a blank `titulo_orig` when the Spanish title is the original one ("From"):
-  the page's `titulo` is checked instead, against the same title and year;
+- the page's own `titulo` counts as a title too, on any page dated by `año`
+  or `año_emision`. It is the only spelling when `titulo_orig` is blank
+  ("From") or absent ("Better Call Saul"), and the one that matches when
+  `titulo_orig` is a transliteration the local title never uses ("Beastars":
+  ビースターズ, Bīsutāzu). The year is checked against it like any title;
+- the year given only as the years on air, in `año_emision` ("Coraje, el
+  perro cobarde");
 - the dub's country split over `pais1` … `pais10` when it was recorded in
   several countries ("El asombroso circo digital");
 - a native title with its romanization on the next line, in parentheses
