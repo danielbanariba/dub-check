@@ -1142,3 +1142,73 @@ class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.
                 "|pais = {{Bandera|México}} México\n|año = 2014\n}}")
         self.assertEqual(self.verdict("Birdman", page, "The Unexpected Virtue of Ignorance", 2014),
                          "NO_ENCONTRADO")
+
+
+class FetchSeriesShouldBeStrictlyReadOnly(unittest.TestCase):
+    def test_issues_one_get_to_sonarrs_series_list_with_the_key_as_a_header(self):
+        import dub_check
+        captured = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'[{"id": 1, "title": "From", "year": 2022}]'
+
+        def fake_urlopen(request, timeout=None):
+            captured.append(request)
+            return FakeResponse()
+
+        with patch("dub_check.urllib.request.urlopen", side_effect=fake_urlopen):
+            series = dub_check.fetch_series("http://localhost:8989/", "the-real-key")
+
+        self.assertEqual(series, [{"id": 1, "title": "From", "year": 2022}])
+        self.assertEqual([(r.get_method(), r.full_url) for r in captured],
+                         [("GET", "http://localhost:8989/api/v3/series")])
+        self.assertEqual(captured[0].get_header("X-api-key"), "the-real-key")
+
+
+class MainSeriesModeShouldRecordAVerdictPerSonarrSeries(unittest.TestCase):
+    TITANES = ("{{Infobox\n|titulo = Ataque de los titanes\n"
+               "|titulo_orig = 進撃の巨人<br>(''Shingeki no Kyojin'')\n"
+               "|pais = {{Bandera|México}} México\n|año = 2013\n}}")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name)
+        self.out_path = base / "series-results.json"
+        config = base / "config.xml"
+        config.write_text("<Config><ApiKey>fake-key-xyz</ApiKey></Config>", encoding="utf-8")
+        self.argv = ["series", "--sonarr-config", str(config), "--out", str(self.out_path),
+                     "--cache-dir", str(base / "cache"), "--min-interval", "0"]
+
+    def run_series(self, series, search_results, pages):
+        with patch("dub_check.fetch_series", return_value=series) as fetch, \
+             patch.object(WikiClient, "_http_get_json", fake_wiki_backend(search_results, pages)), \
+             redirect_stdout(io.StringIO()):
+            main(self.argv)
+        fetch.assert_called_once_with("http://localhost:8989", "fake-key-xyz")
+        return json.loads(self.out_path.read_text(encoding="utf-8"))
+
+    def test_writes_a_verdict_under_each_series_id(self):
+        results = self.run_series(
+            [{"id": 58, "title": "From", "year": 2022, "tvdbId": 401003},
+             {"id": 7, "title": "Nothing Like It", "year": 2020}],
+            {"From": ["From"]},
+            {"From": EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms.FROM})
+        self.assertEqual((results["58"]["status"], results["58"]["page_title"], results["58"]["tvdbId"]),
+                         ("LATINO", "From", 401003))
+        self.assertEqual(results["7"]["status"], "NO_ENCONTRADO")
+
+    def test_an_alternate_title_verifies_a_page_the_title_does_not(self):
+        results = self.run_series(
+            [{"id": 3, "title": "Attack on Titan", "year": 2013,
+              "alternateTitles": [{"title": "Shingeki no Kyojin"}]}],
+            {"Attack on Titan": ["Ataque de los titanes"], "Shingeki no Kyojin": ["Ataque de los titanes"]},
+            {"Ataque de los titanes": self.TITANES})
+        self.assertEqual(results["3"]["status"], "LATINO")

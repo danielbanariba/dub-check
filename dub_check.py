@@ -697,11 +697,12 @@ class WikiClient:
 
 
 # ---------------------------------------------------------------------------
-# Radarr client -- READ-ONLY.
+# Radarr and Sonarr clients -- READ-ONLY.
 #
-# This tool reports on Radarr's wanted list; it never monitors, searches,
-# blocklists, or otherwise edits anything in Radarr. Every function below
-# issues GET requests only. Do not add a POST/PUT/DELETE call here.
+# This tool reports on Radarr's wanted list and Sonarr's series; it never
+# monitors, searches, blocklists, or otherwise edits anything in either.
+# Every function below issues GET requests only. Do not add a POST/PUT/DELETE
+# call here: whatever acts on a verdict lives outside this tool.
 # ---------------------------------------------------------------------------
 
 _API_KEY_RE = re.compile(r"<ApiKey>([^<]+)</ApiKey>")
@@ -740,6 +741,38 @@ def fetch_wanted_missing(base_url: str, api_key: str, page_size: int = 200, max_
             break
         page += 1
     return records
+
+
+def fetch_series(base_url: str, api_key: str) -> list[dict]:
+    """GET Sonarr's whole series list (it is not paginated). Read-only."""
+    url = f"{base_url.rstrip('/')}/api/v3/series"
+    request = urllib.request.Request(url, headers={"X-Api-Key": api_key})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+# How many of Sonarr's alternate titles are tried after the series' own one.
+# Anime is listed under its English title while the wiki keeps the
+# romanization ("Attack on Titan" vs "Shingeki no Kyojin"); the first few
+# alternates hold it, and each one costs wiki requests.
+SERIES_ALTERNATE_TITLES = 5
+
+
+def evaluate_series(series: dict, search_fn, fetch_fn) -> Verdict:
+    """evaluate_film for a Sonarr series, retried with its alternate titles
+    as the original title. The first LATINO wins; otherwise a CASTELLANO
+    found under any of them; otherwise NO_ENCONTRADO."""
+    title = series.get("title")
+    alternates = _unique_preserve_order(
+        [title] + [a.get("title") or "" for a in series.get("alternateTitles") or []])
+    found = None
+    for original in alternates[: SERIES_ALTERNATE_TITLES + 1]:
+        verdict = evaluate_film(title, original, series.get("year"), search_fn, fetch_fn)
+        if verdict.status == "LATINO":
+            return verdict
+        if found is None or (verdict.status == "CASTELLANO" and found.status != "CASTELLANO"):
+            found = verdict
+    return found
 
 
 # ---------------------------------------------------------------------------
@@ -785,12 +818,15 @@ DEFAULT_RADARR_URL = "http://localhost:7878"
 DEFAULT_RADARR_CONFIG = Path(__file__).resolve().parent.parent / "radarr" / "config.xml"
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 DEFAULT_RESULTS_PATH = Path(__file__).resolve().parent / "results.json"
+DEFAULT_SONARR_URL = "http://localhost:8989"
+DEFAULT_SONARR_CONFIG = Path(__file__).resolve().parent.parent / "sonarr" / "config.xml"
+DEFAULT_SERIES_RESULTS_PATH = Path(__file__).resolve().parent / "series-results.json"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dub_check.py",
-        description="Does a Latino Spanish dub exist for a film? Checks doblaje.fandom.com.",
+        description="Does a Latino Spanish dub exist for a film or series? Checks doblaje.fandom.com.",
     )
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
@@ -811,6 +847,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     batch.add_argument("--force", action="store_true", help="Re-check movies already present in --out")
     batch.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     batch.add_argument("--min-interval", type=float, default=DEFAULT_MIN_REQUEST_INTERVAL_SECONDS)
+
+    series = subparsers.add_parser("series", help="Check every series in Sonarr")
+    series.add_argument("--sonarr-url", default=DEFAULT_SONARR_URL)
+    series.add_argument("--sonarr-config", type=Path, default=DEFAULT_SONARR_CONFIG)
+    series.add_argument("--out", type=Path, default=DEFAULT_SERIES_RESULTS_PATH, help="Where to write results (JSON)")
+    series.add_argument("--limit", type=int, default=None, help="Only process the first N series (useful for testing)")
+    series.add_argument("--force", action="store_true", help="Re-check series already present in --out")
+    series.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    series.add_argument("--min-interval", type=float, default=DEFAULT_MIN_REQUEST_INTERVAL_SECONDS)
 
     return parser
 
@@ -847,45 +892,60 @@ def _print_batch_summary(results: dict) -> None:
     print(f"NO_ENCONTRADO (no confirmed page today -- NOT proof one can never exist): {counts['NO_ENCONTRADO']}")
 
 
-def cmd_batch(args: argparse.Namespace) -> int:
-    api_key = read_radarr_api_key(args.radarr_config)
-    movies = fetch_wanted_missing(args.radarr_url, api_key)  # READ-ONLY: GET only, see fetch_wanted_missing
+def _check_each(items: list[dict], args: argparse.Namespace, check, extra=lambda item: {}) -> int:
+    """The loop batch and series share: one verdict per item id, flushed to
+    --out after each, skipping ids already there unless --force."""
     if args.limit is not None:
-        movies = movies[: args.limit]
+        items = items[: args.limit]
 
     results = _load_results(args.out)
     cache = DiskCache(args.cache_dir)
     client = WikiClient(cache, min_interval=args.min_interval)
 
-    for movie in movies:
-        movie_id = str(movie.get("id"))
-        if movie_id in results and not args.force:
+    for item in items:
+        item_id = str(item.get("id"))
+        if item_id in results and not args.force:
             continue  # already resolved in a previous run -- this is the resumability contract
 
-        title = movie.get("title")
-        original_title = movie.get("originalTitle")
-        year = movie.get("year")
+        title = item.get("title")
+        year = item.get("year")
         try:
-            verdict = evaluate_film(title, original_title, year, client.search, client.get_wikitext)
+            verdict = check(item, client)
         except (urllib.error.URLError, urllib.error.HTTPError) as exc:
             # Left out of `results` on purpose: a transient network failure
             # is not a verdict, and omitting the entry means the next run
-            # retries this movie instead of silently treating it as done.
+            # retries this item instead of silently treating it as done.
             print(f"WARNING: network error checking {title!r}: {exc} -- left for a future run", file=sys.stderr)
             continue
 
-        results[movie_id] = {
+        results[item_id] = {
             "title": title,
             "year": year,
             "status": verdict.status,
             "page_title": verdict.page_title,
             "notes": verdict.notes,
+            **extra(item),
         }
-        _save_results(args.out, results)  # flushed after every movie so a killed run loses no progress
+        _save_results(args.out, results)  # flushed after every item so a killed run loses no progress
         print(f"{title} ({year}): {verdict.status}")
 
     _print_batch_summary(results)
     return 0
+
+
+def cmd_batch(args: argparse.Namespace) -> int:
+    api_key = read_radarr_api_key(args.radarr_config)
+    movies = fetch_wanted_missing(args.radarr_url, api_key)  # READ-ONLY: GET only, see fetch_wanted_missing
+    return _check_each(movies, args, lambda movie, client: evaluate_film(
+        movie.get("title"), movie.get("originalTitle"), movie.get("year"), client.search, client.get_wikitext))
+
+
+def cmd_series(args: argparse.Namespace) -> int:
+    api_key = read_radarr_api_key(args.sonarr_config)  # same <ApiKey> element in Sonarr's config.xml
+    series = fetch_series(args.sonarr_url, api_key)  # READ-ONLY: GET only, see fetch_series
+    return _check_each(series, args,
+                       lambda show, client: evaluate_series(show, client.search, client.get_wikitext),
+                       extra=lambda show: {"tvdbId": show.get("tvdbId")})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -895,6 +955,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_single(args)
     if args.mode == "batch":
         return cmd_batch(args)
+    if args.mode == "series":
+        return cmd_series(args)
     parser.error("unknown mode")  # argparse's required=True makes this unreachable in practice
     return 2
 

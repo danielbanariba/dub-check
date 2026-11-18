@@ -1,6 +1,6 @@
 # dub-check
 
-Answers one question for a film: **does a Latino Spanish dub exist?**
+Answers one question for a film or a series: **does a Latino Spanish dub exist?**
 
 It exists because Radarr's wanted list accumulates movies that can never be
 found in Latino Spanish, and chasing those forever wastes effort. This tool
@@ -8,7 +8,7 @@ checks [doblaje.fandom.com](https://doblaje.fandom.com) (Doblaje Wiki) so
 that question doesn't have to be answered by hand, one film at a time, in a
 chat window.
 
-Python 3, standard library only. Read-only towards Radarr.
+Python 3, standard library only. Read-only towards Radarr and Sonarr.
 
 ## Quick path
 
@@ -18,6 +18,9 @@ python3 dub_check.py single "Videodrome" --original-title "Videodrome" --year 19
 
 # Every film in Radarr's wanted/missing list
 python3 dub_check.py batch
+
+# Every series in Sonarr
+python3 dub_check.py series
 ```
 
 Single-film output:
@@ -119,7 +122,38 @@ skipped on the next run — kill the process partway through ~112 movies and
 re-running picks up where it left off, at no cost to the wiki. Pass
 `--force` to re-check everything anyway.
 
-## Radarr access
+### Series (every series in Sonarr)
+
+```bash
+python3 dub_check.py series [--out series-results.json] [--limit N] [--force]
+```
+
+The same flags as batch mode, with `--sonarr-url` (`http://localhost:8989`)
+and `--sonarr-config` (`../sonarr/config.xml`) in place of Radarr's, and
+results written to `dub-check/series-results.json`, keyed by Sonarr series
+id. Each entry also carries the series' `tvdbId`.
+
+A series is checked under its own title first, then under up to five of
+Sonarr's alternate titles as the original title: anime is listed by its
+English title while the wiki keeps the romanization ("Attack on Titan",
+"Shingeki no Kyojin"). The first LATINO wins.
+
+Series pages fill the infobox differently from films, and all three shapes
+below are read:
+
+- a blank `titulo_orig` when the Spanish title is the original one ("From"):
+  the page's `titulo` is checked instead, against the same title and year;
+- the dub's country split over `pais1` … `pais10` when it was recorded in
+  several countries ("El asombroso circo digital");
+- a native title with its romanization on the next line, in parentheses
+  ("ガチアクタ<br>(''Gachiakuta'')"): both lines count as titles.
+
+## Radarr and Sonarr access
+
+The only Sonarr call this tool makes is `GET /api/v3/series`. What to do
+with a verdict, such as choosing a series' quality profile, belongs to
+whatever reads `series-results.json`, never to this tool.
+
 
 Read-only: the only Radarr call this tool makes is
 `GET /api/v3/wanted/missing`. It never monitors, searches, blocklists, or
