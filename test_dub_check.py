@@ -1101,3 +1101,44 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.TestCase):
+    """Series pages on doblaje.fandom.com fill the same infobox differently.
+    The shapes below are trimmed from the real pages for From, El asombroso
+    circo digital and Gachiakuta, all three with a Mexican dub, all three
+    reported NO_ENCONTRADO before series were supported."""
+
+    FROM = ("{{Infobox\n|titulo = From\n|titulo_orig = \n|estudio_doblaje = [[Plan B3]]\n"
+            "|pais = {{Bandera|México}} México\n|origen = {{Bandera|Estados Unidos}} Estados Unidos\n"
+            "|año = 2022-presente\n}}")
+    CIRCO = ("{{Infobox\n|titulo = El asombroso circo digital\n|titulo_orig = The Amazing Digital Circus\n"
+             "|pais1 = {{Bandera|Argentina}} Argentina\n"
+             "|pais2 = {{Bandera|México}} {{Bandera|Distrito Federal (México)}}<br>Ciudad de México\n"
+             "|origen1 = {{Bandera|Australia}} Australia\n|año = 2023-2026\n}}")
+    GACHIAKUTA = ("{{Infobox\n|titulo = Gachiakuta\n|titulo_orig = ガチアクタ<br>(''Gachiakuta'')\n"
+                  "|pais = {{Bandera|México}} México\n|origen = {{Bandera|Japón}} Japón\n|año = 2025-presente\n}}")
+
+    def verdict(self, page_title, wikitext, title, year):
+        return evaluate_film(title, title, year, lambda term, limit: [page_title],
+                             lambda page: wikitext).status
+
+    def test_a_blank_titulo_orig_reads_the_title_the_page_gives(self):
+        self.assertEqual(self.verdict("From", self.FROM, "From", 2022), "LATINO")
+
+    def test_a_blank_titulo_orig_still_needs_that_title_to_match(self):
+        other = self.FROM.replace("|titulo = From", "|titulo = Desde el más allá")
+        self.assertEqual(self.verdict("Desde el más allá", other, "From", 2022), "NO_ENCONTRADO")
+
+    def test_the_dubs_country_may_be_split_over_numbered_pais_fields(self):
+        self.assertEqual(self.verdict("El asombroso circo digital", self.CIRCO,
+                                      "The Amazing Digital Circus", 2023), "LATINO")
+
+    def test_a_romanization_under_the_native_title_is_a_title_too(self):
+        self.assertEqual(self.verdict("Gachiakuta", self.GACHIAKUTA, "Gachiakuta", 2025), "LATINO")
+
+    def test_a_parenthesis_inside_one_line_title_is_not_split_off(self):
+        page = ("{{Infobox\n|titulo_orig = Birdman (or The Unexpected Virtue of Ignorance)\n"
+                "|pais = {{Bandera|México}} México\n|año = 2014\n}}")
+        self.assertEqual(self.verdict("Birdman", page, "The Unexpected Virtue of Ignorance", 2014),
+                         "NO_ENCONTRADO")

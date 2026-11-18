@@ -270,6 +270,7 @@ def classify_countries(countries: list[str]) -> str:
 
 _SMALL_SPAN_RE = re.compile(r"<small>.*?</small>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WIKILINK_RE = re.compile(r"\[\[([^\]]*)\]\]")
 _FILE_NAMESPACE_PREFIXES = ("archivo:", "file:", "imagen:", "image:")
 
@@ -343,7 +344,24 @@ def extract_original_titles(fields: dict[str, str]) -> list[str]:
         value = fields.get(f"titulo_orig{n}")
         if value:
             raw_values.append(value)
-    return [strip_wiki_markup(v) for v in raw_values]
+    if not raw_values and "titulo_orig" in fields and fields.get("titulo"):
+        # A series whose Spanish title is its original one leaves
+        # titulo_orig blank (real page "From": titulo = From, titulo_orig
+        # empty). Only a page that has the field at all, so a bio page's
+        # infobox never turns its name into a title.
+        raw_values.append(fields["titulo"])
+    titles = []
+    for raw in raw_values:
+        titles.append(strip_wiki_markup(raw))
+        # A native title with its romanization on the next line, in
+        # parentheses (real page "Gachiakuta": ガチアクタ<br>(''Gachiakuta'')).
+        # Each such line is a title too; a parenthesis inside one line is
+        # part of the title and is left alone.
+        lines = [strip_wiki_markup(part) for part in _BR_RE.split(raw)]
+        if len(lines) > 1:
+            titles.extend(m.group(1).strip() for line in lines
+                          if (m := re.fullmatch(r"\((.+)\)", line)))
+    return titles
 
 
 # ---------------------------------------------------------------------------
@@ -431,7 +449,10 @@ def evaluate_candidate(
             f"does not contain {year} (+/-{year_tolerance}) -> rejected",
         )
 
-    countries = extract_countries(candidate_pais_raw or "")
+    # A dub recorded in several countries credits them in numbered fields
+    # instead (real page "El asombroso circo digital": pais1 .. pais6).
+    pais_values = [candidate_pais_raw or ""] + [fields.get(f"pais{n}", "") for n in range(1, 11)]
+    countries = [c for value in pais_values for c in extract_countries(value)]
     country_class = classify_countries(countries)
     year_note = "año not checked (no target year given)" if year_ok is None else f"año matches ({candidate_ano_raw!r})"
     return CandidateResult(
