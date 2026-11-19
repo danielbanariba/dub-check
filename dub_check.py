@@ -53,6 +53,10 @@ LATIN_AMERICAN_COUNTRIES = frozenset({
     "puerto rico", "ecuador", "uruguay", "bolivia", "paraguay",
     "guatemala", "honduras", "el salvador", "nicaragua", "costa rica",
     "panama", "cuba", "republica dominicana",
+    # A Spanish dub recorded in the United States (Los Angeles, Miami) is a
+    # Latin American one; Castilian dubs are recorded in Spain. Real page
+    # "BoJack Horseman": pais = Estados Unidos, California, nothing else.
+    "estados unidos",
 })
 SPAIN_NAMES = frozenset({"espana", "spain"})
 
@@ -185,7 +189,11 @@ def parse_infobox_fields(wikitext: str) -> dict[str, str]:
     first template is not a film infobox (e.g. a voice actor's bio page)
     simply yields a dict without "titulo_orig"/"año" keys -- callers must
     treat those as absent, not crash."""
-    start = wikitext.find("{{")
+    # The infobox is not always the first template: some pages open with a
+    # badge ("South Park": {{Estrella}}{{Infobox ...). Take the first
+    # Infobox, and only fall back to the first template when there is none.
+    infobox = re.search(r"\{\{\s*infobox", wikitext, re.IGNORECASE)
+    start = infobox.start() if infobox else wikitext.find("{{")
     if start == -1:
         return {}
     end = _find_matching_close(wikitext, start)
@@ -228,7 +236,16 @@ def extract_countries(pais_raw: str) -> list[str]:
         return []
     matches = _BANDERA_RE.findall(pais_raw)
     if matches:
-        return [normalize_title(m) for m in matches]
+        # A flag can carry a note in parentheses: a period ("Venezuela
+        # (1954-2006)") or the country of a city or state ("California
+        # (Estados Unidos)"). Both the name and a note with letters count.
+        countries = []
+        for flag in matches:
+            name, _, note = flag.partition("(")
+            countries.append(normalize_title(name))
+            if re.search(r"[^\W\d_]", note):
+                countries.append(normalize_title(note.rstrip(") ")))
+        return countries
     # Fallback for a pais field with no {{Bandera|..}} template (not seen in
     # the pages checked while building this tool, but cheap to handle
     # defensively). Deliberately conservative: stripped markup either
@@ -270,6 +287,7 @@ def classify_countries(countries: list[str]) -> str:
 
 _SMALL_SPAN_RE = re.compile(r"<small>.*?</small>", re.IGNORECASE | re.DOTALL)
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
+_BR_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 _WIKILINK_RE = re.compile(r"\[\[([^\]]*)\]\]")
 _FILE_NAMESPACE_PREFIXES = ("archivo:", "file:", "imagen:", "image:")
 
@@ -343,7 +361,26 @@ def extract_original_titles(fields: dict[str, str]) -> list[str]:
         value = fields.get(f"titulo_orig{n}")
         if value:
             raw_values.append(value)
-    return [strip_wiki_markup(v) for v in raw_values]
+    if fields.get("titulo") and ("año" in fields or "año_emision" in fields):
+        # The page's own title, on a page dated like a film or series (a bio
+        # page's infobox has neither field). It is the only spelling left
+        # when titulo_orig is blank ("From") or absent ("Better Call Saul"),
+        # and the one that matches when titulo_orig is a transliteration
+        # the local title never uses ("Beastars": ビースターズ, Bīsutāzu).
+        # The year check below still applies to it like to any title.
+        raw_values.append(fields["titulo"])
+    titles = []
+    for raw in raw_values:
+        titles.append(strip_wiki_markup(raw))
+        # A native title with its romanization on the next line, in
+        # parentheses (real page "Gachiakuta": ガチアクタ<br>(''Gachiakuta'')).
+        # Each such line is a title too; a parenthesis inside one line is
+        # part of the title and is left alone.
+        lines = [strip_wiki_markup(part) for part in _BR_RE.split(raw)]
+        if len(lines) > 1:
+            titles.extend(m.group(1).strip() for line in lines
+                          if (m := re.fullmatch(r"\((.+)\)", line)))
+    return titles
 
 
 # ---------------------------------------------------------------------------
@@ -410,7 +447,9 @@ def evaluate_candidate(
     variants for a film with several alternate international titles -- see
     extract_original_titles) -- a match against ANY one of them counts."""
     candidate_titles = extract_original_titles(fields)
-    candidate_ano_raw = fields.get("año")
+    # Series pages often give only the years on air ("Coraje, el perro
+    # cobarde": año_emision = 1999-2002, no año).
+    candidate_ano_raw = fields.get("año") or fields.get("año_emision")
     candidate_pais_raw = fields.get("pais")
 
     matched_title = next(
@@ -431,7 +470,16 @@ def evaluate_candidate(
             f"does not contain {year} (+/-{year_tolerance}) -> rejected",
         )
 
-    countries = extract_countries(candidate_pais_raw or "")
+    # A dub recorded in several countries credits them in numbered fields
+    # instead (real page "El asombroso circo digital": pais1 .. pais6).
+    pais_values = [candidate_pais_raw or ""] + [fields.get(f"pais{n}", "") for n in range(1, 11)]
+    countries = [c for value in pais_values for c in extract_countries(value)]
+    if not countries:
+        # No pais at all: the flag on the recording date is where the dub
+        # was recorded ("Black Mirror": {{Bandera|Argentina}} Agosto de 2016).
+        # Only a flag counts here, never the date text around it.
+        grabacion = fields.get("fecha_grabacion") or ""
+        countries = extract_countries(grabacion) if _BANDERA_RE.search(grabacion) else []
     country_class = classify_countries(countries)
     year_note = "año not checked (no target year given)" if year_ok is None else f"año matches ({candidate_ano_raw!r})"
     return CandidateResult(
@@ -443,7 +491,7 @@ def evaluate_candidate(
 
 @dataclass
 class Verdict:
-    status: str  # "LATINO" | "CASTELLANO" | "NO_ENCONTRADO"
+    status: str  # "LATINO" | "CASTELLANO" | "SIN_PAIS" | "NO_ENCONTRADO"
     page_title: str | None
     notes: list[str] = field(default_factory=list)
 
@@ -486,6 +534,7 @@ def evaluate_film(
     seen_pages: set[str] = set()
     notes: list[str] = []
     best: CandidateResult | None = None
+    no_country: CandidateResult | None = None
 
     for term in search_terms:
         for page_title in search_fn(term, search_limit):
@@ -507,6 +556,8 @@ def evaluate_film(
                 return Verdict("LATINO", page_title, notes)
             if result.verified and result.country_class == "castellano" and best is None:
                 best = result
+            if result.verified and result.country_class == "unknown" and no_country is None:
+                no_country = result
 
         # Deliberately NOT breaking here even once a Castellano match is
         # found: CASTELLANO is not the answer Daniel wants, and the next
@@ -516,6 +567,13 @@ def evaluate_film(
 
     if best is not None:
         return Verdict("CASTELLANO", best.page_title, notes)
+    if no_country is not None:
+        # The page is this work's and documents a dub, but credits no
+        # country anywhere this tool reads ("Padre de familia", "Twisted
+        # Metal"), or only one it does not recognize. Not a LATINO: that is never guessed. Not NO_ENCONTRADO
+        # either: the page exists, and whoever acts on the verdict may weigh
+        # that differently from no page at all.
+        return Verdict("SIN_PAIS", no_country.page_title, notes)
     return Verdict("NO_ENCONTRADO", None, notes)
 
 
@@ -676,11 +734,12 @@ class WikiClient:
 
 
 # ---------------------------------------------------------------------------
-# Radarr client -- READ-ONLY.
+# Radarr and Sonarr clients -- READ-ONLY.
 #
-# This tool reports on Radarr's wanted list; it never monitors, searches,
-# blocklists, or otherwise edits anything in Radarr. Every function below
-# issues GET requests only. Do not add a POST/PUT/DELETE call here.
+# This tool reports on Radarr's wanted list and Sonarr's series; it never
+# monitors, searches, blocklists, or otherwise edits anything in either.
+# Every function below issues GET requests only. Do not add a POST/PUT/DELETE
+# call here: whatever acts on a verdict lives outside this tool.
 # ---------------------------------------------------------------------------
 
 _API_KEY_RE = re.compile(r"<ApiKey>([^<]+)</ApiKey>")
@@ -721,6 +780,39 @@ def fetch_wanted_missing(base_url: str, api_key: str, page_size: int = 200, max_
     return records
 
 
+def fetch_series(base_url: str, api_key: str) -> list[dict]:
+    """GET Sonarr's whole series list (it is not paginated). Read-only."""
+    url = f"{base_url.rstrip('/')}/api/v3/series"
+    request = urllib.request.Request(url, headers={"X-Api-Key": api_key})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+# How many of Sonarr's alternate titles are tried after the series' own one.
+# Anime is listed under its English title while the wiki keeps the
+# romanization ("Attack on Titan" vs "Shingeki no Kyojin"); the first few
+# alternates hold it, and each one costs wiki requests.
+SERIES_ALTERNATE_TITLES = 5
+
+
+def evaluate_series(series: dict, search_fn, fetch_fn) -> Verdict:
+    """evaluate_film for a Sonarr series, retried with its alternate titles
+    as the original title. The first LATINO wins; otherwise a CASTELLANO
+    found under any of them, then a SIN_PAIS; otherwise NO_ENCONTRADO."""
+    title = series.get("title")
+    alternates = _unique_preserve_order(
+        [title] + [a.get("title") or "" for a in series.get("alternateTitles") or []])
+    rank = {"CASTELLANO": 2, "SIN_PAIS": 1, "NO_ENCONTRADO": 0}
+    found = None
+    for original in alternates[: SERIES_ALTERNATE_TITLES + 1]:
+        verdict = evaluate_film(title, original, series.get("year"), search_fn, fetch_fn)
+        if verdict.status == "LATINO":
+            return verdict
+        if found is None or rank[verdict.status] > rank[found.status]:
+            found = verdict
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Human-readable verdict formatting
 # ---------------------------------------------------------------------------
@@ -737,6 +829,12 @@ def format_verdict(title: str, year: int | None, verdict: Verdict) -> str:
         lines.append(
             f'Evidence: a dub was confirmed on doblaje.fandom.com, page "{verdict.page_title}", but it is '
             "credited to Spain (Castellano), not Latin America -- this is NOT the dub that was requested."
+        )
+    elif verdict.status == "SIN_PAIS":
+        lines.append(
+            f'Evidence: page "{verdict.page_title}" on doblaje.fandom.com was verified as this title and '
+            "documents a dub, but credits no country this tool recognizes as Latin American or as "
+            "Spain, or none at all -- neither LATINO nor CASTELLANO can be confirmed from it."
         )
     else:
         lines.append(
@@ -764,12 +862,15 @@ DEFAULT_RADARR_URL = "http://localhost:7878"
 DEFAULT_RADARR_CONFIG = Path(__file__).resolve().parent.parent / "radarr" / "config.xml"
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parent / ".cache"
 DEFAULT_RESULTS_PATH = Path(__file__).resolve().parent / "results.json"
+DEFAULT_SONARR_URL = "http://localhost:8989"
+DEFAULT_SONARR_CONFIG = Path(__file__).resolve().parent.parent / "sonarr" / "config.xml"
+DEFAULT_SERIES_RESULTS_PATH = Path(__file__).resolve().parent / "series-results.json"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="dub_check.py",
-        description="Does a Latino Spanish dub exist for a film? Checks doblaje.fandom.com.",
+        description="Does a Latino Spanish dub exist for a film or series? Checks doblaje.fandom.com.",
     )
     subparsers = parser.add_subparsers(dest="mode", required=True)
 
@@ -790,6 +891,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
     batch.add_argument("--force", action="store_true", help="Re-check movies already present in --out")
     batch.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     batch.add_argument("--min-interval", type=float, default=DEFAULT_MIN_REQUEST_INTERVAL_SECONDS)
+
+    series = subparsers.add_parser("series", help="Check every series in Sonarr")
+    series.add_argument("--sonarr-url", default=DEFAULT_SONARR_URL)
+    series.add_argument("--sonarr-config", type=Path, default=DEFAULT_SONARR_CONFIG)
+    series.add_argument("--out", type=Path, default=DEFAULT_SERIES_RESULTS_PATH, help="Where to write results (JSON)")
+    series.add_argument("--limit", type=int, default=None, help="Only process the first N series (useful for testing)")
+    series.add_argument("--force", action="store_true", help="Re-check series already present in --out")
+    series.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    series.add_argument("--min-interval", type=float, default=DEFAULT_MIN_REQUEST_INTERVAL_SECONDS)
 
     return parser
 
@@ -816,55 +926,71 @@ def _save_results(path: Path, results: dict) -> None:
 
 
 def _print_batch_summary(results: dict) -> None:
-    counts = {"LATINO": 0, "CASTELLANO": 0, "NO_ENCONTRADO": 0}
+    counts = {"LATINO": 0, "CASTELLANO": 0, "SIN_PAIS": 0, "NO_ENCONTRADO": 0}
     for entry in results.values():
         counts[entry["status"]] = counts.get(entry["status"], 0) + 1
     print()
     print("=== Summary ===")
     print(f"LATINO       (confirmed Latino dub -- worth hunting):        {counts['LATINO']}")
     print(f"CASTELLANO   (Spain-only dub confirmed -- not what Daniel wants): {counts['CASTELLANO']}")
+    print(f"SIN_PAIS     (a verified page that names no dub country):     {counts['SIN_PAIS']}")
     print(f"NO_ENCONTRADO (no confirmed page today -- NOT proof one can never exist): {counts['NO_ENCONTRADO']}")
 
 
-def cmd_batch(args: argparse.Namespace) -> int:
-    api_key = read_radarr_api_key(args.radarr_config)
-    movies = fetch_wanted_missing(args.radarr_url, api_key)  # READ-ONLY: GET only, see fetch_wanted_missing
+def _check_each(items: list[dict], args: argparse.Namespace, check, extra=lambda item: {}) -> int:
+    """The loop batch and series share: one verdict per item id, flushed to
+    --out after each, skipping ids already there unless --force."""
     if args.limit is not None:
-        movies = movies[: args.limit]
+        items = items[: args.limit]
 
     results = _load_results(args.out)
     cache = DiskCache(args.cache_dir)
     client = WikiClient(cache, min_interval=args.min_interval)
 
-    for movie in movies:
-        movie_id = str(movie.get("id"))
-        if movie_id in results and not args.force:
+    for item in items:
+        item_id = str(item.get("id"))
+        if item_id in results and not args.force:
             continue  # already resolved in a previous run -- this is the resumability contract
 
-        title = movie.get("title")
-        original_title = movie.get("originalTitle")
-        year = movie.get("year")
+        title = item.get("title")
+        year = item.get("year")
         try:
-            verdict = evaluate_film(title, original_title, year, client.search, client.get_wikitext)
+            verdict = check(item, client)
         except (urllib.error.URLError, urllib.error.HTTPError) as exc:
             # Left out of `results` on purpose: a transient network failure
             # is not a verdict, and omitting the entry means the next run
-            # retries this movie instead of silently treating it as done.
+            # retries this item instead of silently treating it as done.
             print(f"WARNING: network error checking {title!r}: {exc} -- left for a future run", file=sys.stderr)
             continue
 
-        results[movie_id] = {
+        results[item_id] = {
             "title": title,
             "year": year,
             "status": verdict.status,
             "page_title": verdict.page_title,
             "notes": verdict.notes,
+            **extra(item),
         }
-        _save_results(args.out, results)  # flushed after every movie so a killed run loses no progress
+        _save_results(args.out, results)  # flushed after every item so a killed run loses no progress
         print(f"{title} ({year}): {verdict.status}")
 
     _print_batch_summary(results)
     return 0
+
+
+def cmd_batch(args: argparse.Namespace) -> int:
+    api_key = read_radarr_api_key(args.radarr_config)
+    movies = fetch_wanted_missing(args.radarr_url, api_key)  # READ-ONLY: GET only, see fetch_wanted_missing
+    return _check_each(movies, args, lambda movie, client: evaluate_film(
+        movie.get("title"), movie.get("originalTitle"), movie.get("year"), client.search, client.get_wikitext))
+
+
+def cmd_series(args: argparse.Namespace) -> int:
+    api_key = read_radarr_api_key(args.sonarr_config)  # same <ApiKey> element in Sonarr's config.xml
+    series = fetch_series(args.sonarr_url, api_key)  # READ-ONLY: GET only, see fetch_series
+    return _check_each(series, args,
+                       lambda show, client: evaluate_series(show, client.search, client.get_wikitext),
+                       extra=lambda show: {"tvdbId": show.get("tvdbId")})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -874,6 +1000,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_single(args)
     if args.mode == "batch":
         return cmd_batch(args)
+    if args.mode == "series":
+        return cmd_series(args)
     parser.error("unknown mode")  # argparse's required=True makes this unreachable in practice
     return 2
 

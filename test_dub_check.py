@@ -910,6 +910,12 @@ class FormatVerdictShouldStateHonestlyWhatWasAndWasNotConfirmed(unittest.TestCas
         self.assertIn("LATINO", text)
         self.assertIn("Videodrome: Cuerpos invadidos", text)
 
+    def test_sin_pais_verdict_says_the_page_exists_but_names_no_country(self):
+        text = format_verdict("Twisted Metal", 2023, Verdict("SIN_PAIS", "Twisted Metal", []))
+        self.assertIn("Verdict: SIN_PAIS", text)
+        self.assertIn('page "Twisted Metal"', text)
+        self.assertIn("credits no country this tool recognizes", text)
+
     def test_castellano_verdict_flags_that_this_is_not_the_requested_dub(self):
         verdict = Verdict("CASTELLANO", "Spain Page", [])
         text = format_verdict("Some Film", 1999, verdict)
@@ -1097,6 +1103,185 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         self.assertNotIn("1", results)  # left in place for a future retry
         self.assertIn("2", results)
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
+
+
+class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.TestCase):
+    """Series pages on doblaje.fandom.com fill the same infobox differently.
+    The shapes below are trimmed from the real pages for From, El asombroso
+    circo digital and Gachiakuta, all three with a Mexican dub, all three
+    reported NO_ENCONTRADO before series were supported."""
+
+    FROM = ("{{Infobox\n|titulo = From\n|titulo_orig = \n|estudio_doblaje = [[Plan B3]]\n"
+            "|pais = {{Bandera|México}} México\n|origen = {{Bandera|Estados Unidos}} Estados Unidos\n"
+            "|año = 2022-presente\n}}")
+    CIRCO = ("{{Infobox\n|titulo = El asombroso circo digital\n|titulo_orig = The Amazing Digital Circus\n"
+             "|pais1 = {{Bandera|Argentina}} Argentina\n"
+             "|pais2 = {{Bandera|México}} {{Bandera|Distrito Federal (México)}}<br>Ciudad de México\n"
+             "|origen1 = {{Bandera|Australia}} Australia\n|año = 2023-2026\n}}")
+    GACHIAKUTA = ("{{Infobox\n|titulo_orig = ガチアクタ<br>(''Gachiakuta'')\n"
+                  "|pais = {{Bandera|México}} México\n|origen = {{Bandera|Japón}} Japón\n|año = 2025-presente\n}}")
+
+    def verdict(self, page_title, wikitext, title, year):
+        return evaluate_film(title, title, year, lambda term, limit: [page_title],
+                             lambda page: wikitext).status
+
+    def test_a_blank_titulo_orig_reads_the_title_the_page_gives(self):
+        self.assertEqual(self.verdict("From", self.FROM, "From", 2022), "LATINO")
+
+    def test_a_blank_titulo_orig_still_needs_that_title_to_match(self):
+        other = self.FROM.replace("|titulo = From", "|titulo = Desde el más allá")
+        self.assertEqual(self.verdict("Desde el más allá", other, "From", 2022), "NO_ENCONTRADO")
+
+    def test_the_dubs_country_may_be_split_over_numbered_pais_fields(self):
+        self.assertEqual(self.verdict("El asombroso circo digital", self.CIRCO,
+                                      "The Amazing Digital Circus", 2023), "LATINO")
+
+    def test_a_romanization_under_the_native_title_is_a_title_too(self):
+        self.assertEqual(self.verdict("Gachiakuta", self.GACHIAKUTA, "Gachiakuta", 2025), "LATINO")
+
+    def test_the_year_may_be_given_only_as_the_years_on_air(self):
+        page = ("{{Infobox\n|titulo = Coraje, el perro cobarde\n|titulo_orig = Courage the Cowardly Dog\n"
+                "|pais = {{Bandera|México}} México\n"
+                "|año_emision = 1999-2002<br />2000-2003 <small>(Latinoamérica)</small>\n}}")
+        self.assertEqual(self.verdict("Coraje, el perro cobarde", page, "Courage the Cowardly Dog", 1999),
+                         "LATINO")
+
+    def test_the_pages_own_title_counts_when_the_original_is_a_transliteration(self):
+        page = ("{{Infobox\n|titulo = Beastars\n|titulo_orig = ビースターズ<br />(''Bīsutāzu'')\n"
+                "|pais = {{Bandera|México}} México\n|año = 2019-2026<br /><small>(Japón)</small>\n}}")
+        self.assertEqual(self.verdict("Beastars", page, "BEASTARS", 2019), "LATINO")
+
+    def test_a_badge_template_before_the_infobox_is_skipped(self):
+        page = ("{{Estrella}}\u200b<br> {{Infobox\n|titulo = South Park\n"
+                "|pais = {{Bandera|México}} México\n|año = 1997-presente\n}}")
+        self.assertEqual(self.verdict("South Park", page, "South Park", 1997), "LATINO")
+
+    def test_a_flag_dated_in_parentheses_is_still_its_country(self):
+        page = ("{{Infobox\n|titulo = Hellsing\n|titulo_orig = ヘルシング<br><small>(''Herushingu'')</small>\n"
+                "|pais = {{Bandera|Venezuela (1954-2006)}} Venezuela\n|año = 2001-2002\n}}")
+        self.assertEqual(self.verdict("Hellsing", page, "Hellsing", 2001), "LATINO")
+
+    def test_a_dated_spain_flag_is_still_only_spain(self):
+        page = "{{Infobox\n|titulo_orig = Old Film\n|pais = {{Bandera|España (1945-1977)}} España\n|año = 1970\n}}"
+        self.assertEqual(self.verdict("Old Film", page, "Old Film", 1970), "CASTELLANO")
+
+    def test_a_dub_recorded_in_the_united_states_is_latino(self):
+        page = ("{{Infobox\n|titulo = BoJack Horseman\n"
+                "|pais = {{Bandera|Estados Unidos}} {{Bandera|California (Estados Unidos)}}<br />Los Ángeles, California\n"
+                "|origen = {{Bandera|Estados Unidos}} Estados Unidos\n|año = 2014-2020\n}}")
+        self.assertEqual(self.verdict("BoJack Horseman", page, "BoJack Horseman", 2014), "LATINO")
+
+    def test_the_recording_flag_names_the_country_when_pais_is_missing(self):
+        page = ("{{Infobox\n|titulo = Black Mirror\n|titulo_orig = Black Mirror\n"
+                "|idioma_orig = {{Bandera|Reino Unido}} Inglés\n"
+                "|fecha_grabacion = {{Bandera|Argentina}} Agosto de 2016\n"
+                "|origen = {{Bandera|Reino Unido}} Reino Unido\n|año_emision = 2011-Presente\n}}")
+        self.assertEqual(self.verdict("Black Mirror", page, "Black Mirror", 2011), "LATINO")
+
+    TWISTED_METAL = ("{{Infobox\n|titulo = Twisted Metal\n|idioma_orig = {{Bandera|Estados Unidos}} Inglés\n"
+                     "|origen = {{Bandera|Estados Unidos}} Estados Unidos\n|año = 2023-presente\n}}")
+
+    def test_a_page_that_never_names_the_dubs_country_is_sin_pais(self):
+        self.assertEqual(self.verdict("Twisted Metal", self.TWISTED_METAL, "Twisted Metal", 2023), "SIN_PAIS")
+
+    def test_a_page_that_names_the_country_outranks_one_that_does_not(self):
+        spain = "{{Infobox\n|titulo = Twisted Metal\n|pais = {{Bandera|España}} España\n|año = 2023\n}}"
+        pages = {"Twisted Metal": self.TWISTED_METAL, "Twisted Metal (España)": spain}
+        verdict = evaluate_film("Twisted Metal", "Twisted Metal", 2023,
+                                lambda term, limit: list(pages), pages.get)
+        self.assertEqual(verdict.status, "CASTELLANO")
+
+    def test_a_parenthesis_inside_one_line_title_is_not_split_off(self):
+        page = ("{{Infobox\n|titulo_orig = Birdman (or The Unexpected Virtue of Ignorance)\n"
+                "|pais = {{Bandera|México}} México\n|año = 2014\n}}")
+        self.assertEqual(self.verdict("Birdman", page, "The Unexpected Virtue of Ignorance", 2014),
+                         "NO_ENCONTRADO")
+
+
+class FetchSeriesShouldBeStrictlyReadOnly(unittest.TestCase):
+    def test_issues_one_get_to_sonarrs_series_list_with_the_key_as_a_header(self):
+        import dub_check
+        captured = []
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b'[{"id": 1, "title": "From", "year": 2022}]'
+
+        def fake_urlopen(request, timeout=None):
+            captured.append(request)
+            return FakeResponse()
+
+        with patch("dub_check.urllib.request.urlopen", side_effect=fake_urlopen):
+            series = dub_check.fetch_series("http://localhost:8989/", "the-real-key")
+
+        self.assertEqual(series, [{"id": 1, "title": "From", "year": 2022}])
+        self.assertEqual([(r.get_method(), r.full_url) for r in captured],
+                         [("GET", "http://localhost:8989/api/v3/series")])
+        self.assertEqual(captured[0].get_header("X-api-key"), "the-real-key")
+
+
+class MainSeriesModeShouldRecordAVerdictPerSonarrSeries(unittest.TestCase):
+    TITANES = ("{{Infobox\n|titulo = Ataque de los titanes\n"
+               "|titulo_orig = 進撃の巨人<br>(''Shingeki no Kyojin'')\n"
+               "|pais = {{Bandera|México}} México\n|año = 2013\n}}")
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        base = Path(self._tmp.name)
+        self.out_path = base / "series-results.json"
+        config = base / "config.xml"
+        config.write_text("<Config><ApiKey>fake-key-xyz</ApiKey></Config>", encoding="utf-8")
+        self.argv = ["series", "--sonarr-config", str(config), "--out", str(self.out_path),
+                     "--cache-dir", str(base / "cache"), "--min-interval", "0"]
+
+    def run_series(self, series, search_results, pages):
+        with patch("dub_check.fetch_series", return_value=series) as fetch, \
+             patch.object(WikiClient, "_http_get_json", fake_wiki_backend(search_results, pages)), \
+             redirect_stdout(io.StringIO()):
+            main(self.argv)
+        fetch.assert_called_once_with("http://localhost:8989", "fake-key-xyz")
+        return json.loads(self.out_path.read_text(encoding="utf-8"))
+
+    def test_writes_a_verdict_under_each_series_id(self):
+        results = self.run_series(
+            [{"id": 58, "title": "From", "year": 2022, "tvdbId": 401003},
+             {"id": 7, "title": "Nothing Like It", "year": 2020}],
+            {"From": ["From"]},
+            {"From": EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms.FROM})
+        self.assertEqual((results["58"]["status"], results["58"]["page_title"], results["58"]["tvdbId"]),
+                         ("LATINO", "From", 401003))
+        self.assertEqual(results["7"]["status"], "NO_ENCONTRADO")
+
+    def test_an_alternate_title_that_finds_a_page_without_a_country_is_sin_pais(self):
+        page = ("{{Infobox\n|titulo = Sin pais\n|titulo_orig = Kōkaku Kidōtai\n|año = 1995\n}}")
+        results = self.run_series(
+            [{"id": 4, "title": "Ghost in the Shell", "year": 1995,
+              "alternateTitles": [{"title": "Kōkaku Kidōtai"}]}],
+            {"Kōkaku Kidōtai": ["Sin pais"]}, {"Sin pais": page})
+        self.assertEqual(results["4"]["status"], "SIN_PAIS")
+
+    def test_a_castellano_found_under_a_later_title_outranks_a_page_without_a_country(self):
+        no_country = "{{Infobox\n|titulo_orig = Kidou Senshi\n|año = 1979\n}}"
+        spain = "{{Infobox\n|titulo_orig = Mobile Suit\n|pais = {{Bandera|España}} España\n|año = 1979\n}}"
+        results = self.run_series(
+            [{"id": 9, "title": "Kidou Senshi", "year": 1979, "alternateTitles": [{"title": "Mobile Suit"}]}],
+            {"Kidou Senshi": ["Sin pais"], "Mobile Suit": ["Espana"]}, {"Sin pais": no_country, "Espana": spain})
+        self.assertEqual(results["9"]["status"], "CASTELLANO")
+
+    def test_an_alternate_title_verifies_a_page_the_title_does_not(self):
+        results = self.run_series(
+            [{"id": 3, "title": "Attack on Titan", "year": 2013,
+              "alternateTitles": [{"title": "Shingeki no Kyojin"}]}],
+            {"Attack on Titan": ["Ataque de los titanes"], "Shingeki no Kyojin": ["Ataque de los titanes"]},
+            {"Ataque de los titanes": self.TITANES})
+        self.assertEqual(results["3"]["status"], "LATINO")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 # dub-check
 
-Answers one question for a film: **does a Latino Spanish dub exist?**
+Answers one question for a film or a series: **does a Latino Spanish dub exist?**
 
 It exists because Radarr's wanted list accumulates movies that can never be
 found in Latino Spanish, and chasing those forever wastes effort. This tool
@@ -8,7 +8,7 @@ checks [doblaje.fandom.com](https://doblaje.fandom.com) (Doblaje Wiki) so
 that question doesn't have to be answered by hand, one film at a time, in a
 chat window.
 
-Python 3, standard library only. Read-only towards Radarr.
+Python 3, standard library only. Read-only towards Radarr and Sonarr.
 
 ## Quick path
 
@@ -18,6 +18,9 @@ python3 dub_check.py single "Videodrome" --original-title "Videodrome" --year 19
 
 # Every film in Radarr's wanted/missing list
 python3 dub_check.py batch
+
+# Every series in Sonarr
+python3 dub_check.py series
 ```
 
 Single-film output:
@@ -74,6 +77,7 @@ film's own production country (`origen`) — decides the verdict:
 |---|---|---|
 | `LATINO` | A verified page credits a Latin American country | México, Argentina, Chile, ... |
 | `CASTELLANO` | A verified page exists, but only credits Spain | Not what was requested |
+| `SIN_PAIS` | A verified page documents a dub but credits no recognized country | "Padre de familia", "Twisted Metal" |
 | `NO_ENCONTRADO` | No candidate page could be verified as this film | **Not** proof a dub doesn't exist |
 
 **`NO_ENCONTRADO` is a statement about today's wiki, not a statement about
@@ -112,14 +116,60 @@ python3 dub_check.py batch [--out results.json] [--limit N] [--force]
 
 Batch mode prints a running log, writes `results.json` after **every**
 movie (not just at the end), and finishes with a LATINO / CASTELLANO /
-NO_ENCONTRADO summary count.
+SIN_PAIS / NO_ENCONTRADO summary count.
 
 **Resumable by default.** A movie already present in the results file is
 skipped on the next run — kill the process partway through ~112 movies and
 re-running picks up where it left off, at no cost to the wiki. Pass
 `--force` to re-check everything anyway.
 
-## Radarr access
+### Series (every series in Sonarr)
+
+```bash
+python3 dub_check.py series [--out series-results.json] [--limit N] [--force]
+```
+
+The same flags as batch mode, with `--sonarr-url` (`http://localhost:8989`)
+and `--sonarr-config` (`../sonarr/config.xml`) in place of Radarr's, and
+results written to `dub-check/series-results.json`, keyed by Sonarr series
+id. Each entry also carries the series' `tvdbId`.
+
+A series is checked under its own title first, then under up to five of
+Sonarr's alternate titles as the original title: anime is listed by its
+English title while the wiki keeps the romanization ("Attack on Titan",
+"Shingeki no Kyojin"). The first LATINO wins.
+
+Series pages fill the infobox differently from films, and all three shapes
+below are read:
+
+- the page's own `titulo` counts as a title too, on any page dated by `año`
+  or `año_emision`. It is the only spelling when `titulo_orig` is blank
+  ("From") or absent ("Better Call Saul"), and the one that matches when
+  `titulo_orig` is a transliteration the local title never uses ("Beastars":
+  ビースターズ, Bīsutāzu). The year is checked against it like any title;
+- the year given only as the years on air, in `año_emision` ("Coraje, el
+  perro cobarde");
+- a badge template before the infobox (`{{Estrella}}` on "South Park"): the
+  first `{{Infobox` is read, not the first template;
+- a flag with a note in parentheses, a period ("Venezuela (1954-2006)") or the
+  country of a city ("California (Estados Unidos)"): both count, a period
+  never does;
+- the dub's country only on the recording date's flag, when there is no
+  `pais` ("Black Mirror": `fecha_grabacion = {{Bandera|Argentina}} …`).
+
+A dub recorded in the United States counts as Latin American ("BoJack
+Horseman", recorded in Los Angeles): Castilian dubs are recorded in Spain.
+- the dub's country split over `pais1` … `pais10` when it was recorded in
+  several countries ("El asombroso circo digital");
+- a native title with its romanization on the next line, in parentheses
+  ("ガチアクタ<br>(''Gachiakuta'')"): both lines count as titles.
+
+## Radarr and Sonarr access
+
+The only Sonarr call this tool makes is `GET /api/v3/series`. What to do
+with a verdict, such as choosing a series' quality profile, belongs to
+whatever reads `series-results.json`, never to this tool.
+
 
 Read-only: the only Radarr call this tool makes is
 `GET /api/v3/wanted/missing`. It never monitors, searches, blocklists, or
