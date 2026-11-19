@@ -570,7 +570,7 @@ def evaluate_film(
     if no_country is not None:
         # The page is this work's and documents a dub, but credits no
         # country anywhere this tool reads ("Padre de familia", "Twisted
-        # Metal"). Not a LATINO: that is never guessed. Not NO_ENCONTRADO
+        # Metal"), or only one it does not recognize. Not a LATINO: that is never guessed. Not NO_ENCONTRADO
         # either: the page exists, and whoever acts on the verdict may weigh
         # that differently from no page at all.
         return Verdict("SIN_PAIS", no_country.page_title, notes)
@@ -833,8 +833,8 @@ def format_verdict(title: str, year: int | None, verdict: Verdict) -> str:
     elif verdict.status == "SIN_PAIS":
         lines.append(
             f'Evidence: page "{verdict.page_title}" on doblaje.fandom.com was verified as this title and '
-            "documents a dub, but does not say which country it was recorded in -- neither LATINO nor "
-            "CASTELLANO can be confirmed from it."
+            "documents a dub, but credits no country this tool recognizes as Latin American or as "
+            "Spain, or none at all -- neither LATINO nor CASTELLANO can be confirmed from it."
         )
     else:
         lines.append(

@@ -914,7 +914,7 @@ class FormatVerdictShouldStateHonestlyWhatWasAndWasNotConfirmed(unittest.TestCas
         text = format_verdict("Twisted Metal", 2023, Verdict("SIN_PAIS", "Twisted Metal", []))
         self.assertIn("Verdict: SIN_PAIS", text)
         self.assertIn('page "Twisted Metal"', text)
-        self.assertIn("does not say which country", text)
+        self.assertIn("credits no country this tool recognizes", text)
 
     def test_castellano_verdict_flags_that_this_is_not_the_requested_dub(self):
         verdict = Verdict("CASTELLANO", "Spain Page", [])
@@ -1105,10 +1105,6 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.TestCase):
     """Series pages on doblaje.fandom.com fill the same infobox differently.
     The shapes below are trimmed from the real pages for From, El asombroso
@@ -1122,7 +1118,7 @@ class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.
              "|pais1 = {{Bandera|Argentina}} Argentina\n"
              "|pais2 = {{Bandera|México}} {{Bandera|Distrito Federal (México)}}<br>Ciudad de México\n"
              "|origen1 = {{Bandera|Australia}} Australia\n|año = 2023-2026\n}}")
-    GACHIAKUTA = ("{{Infobox\n|titulo = Gachiakuta\n|titulo_orig = ガチアクタ<br>(''Gachiakuta'')\n"
+    GACHIAKUTA = ("{{Infobox\n|titulo_orig = ガチアクタ<br>(''Gachiakuta'')\n"
                   "|pais = {{Bandera|México}} México\n|origen = {{Bandera|Japón}} Japón\n|año = 2025-presente\n}}")
 
     def verdict(self, page_title, wikitext, title, year):
@@ -1271,6 +1267,14 @@ class MainSeriesModeShouldRecordAVerdictPerSonarrSeries(unittest.TestCase):
             {"Kōkaku Kidōtai": ["Sin pais"]}, {"Sin pais": page})
         self.assertEqual(results["4"]["status"], "SIN_PAIS")
 
+    def test_a_castellano_found_under_a_later_title_outranks_a_page_without_a_country(self):
+        no_country = "{{Infobox\n|titulo_orig = Kidou Senshi\n|año = 1979\n}}"
+        spain = "{{Infobox\n|titulo_orig = Mobile Suit\n|pais = {{Bandera|España}} España\n|año = 1979\n}}"
+        results = self.run_series(
+            [{"id": 9, "title": "Kidou Senshi", "year": 1979, "alternateTitles": [{"title": "Mobile Suit"}]}],
+            {"Kidou Senshi": ["Sin pais"], "Mobile Suit": ["Espana"]}, {"Sin pais": no_country, "Espana": spain})
+        self.assertEqual(results["9"]["status"], "CASTELLANO")
+
     def test_an_alternate_title_verifies_a_page_the_title_does_not(self):
         results = self.run_series(
             [{"id": 3, "title": "Attack on Titan", "year": 2013,
@@ -1278,3 +1282,7 @@ class MainSeriesModeShouldRecordAVerdictPerSonarrSeries(unittest.TestCase):
             {"Attack on Titan": ["Ataque de los titanes"], "Shingeki no Kyojin": ["Ataque de los titanes"]},
             {"Ataque de los titanes": self.TITANES})
         self.assertEqual(results["3"]["status"], "LATINO")
+
+
+if __name__ == "__main__":
+    unittest.main()

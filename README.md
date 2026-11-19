@@ -77,7 +77,7 @@ film's own production country (`origen`) — decides the verdict:
 |---|---|---|
 | `LATINO` | A verified page credits a Latin American country | México, Argentina, Chile, ... |
 | `CASTELLANO` | A verified page exists, but only credits Spain | Not what was requested |
-| `SIN_PAIS` | A verified page documents a dub but credits no country | "Padre de familia", "Twisted Metal" |
+| `SIN_PAIS` | A verified page documents a dub but credits no recognized country | "Padre de familia", "Twisted Metal" |
 | `NO_ENCONTRADO` | No candidate page could be verified as this film | **Not** proof a dub doesn't exist |
 
 **`NO_ENCONTRADO` is a statement about today's wiki, not a statement about
