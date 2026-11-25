@@ -780,6 +780,16 @@ def fetch_wanted_missing(base_url: str, api_key: str, page_size: int = 200, max_
     return records
 
 
+def fetch_all_movies(base_url: str, api_key: str) -> list[dict]:
+    """GET every film in Radarr (/api/v3/movie), including those that already
+    have a file and so are never in wanted/missing. Read-only, like
+    fetch_wanted_missing: one GET, no request body."""
+    url = f"{base_url.rstrip('/')}/api/v3/movie"
+    request = urllib.request.Request(url, headers={"X-Api-Key": api_key})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def fetch_series(base_url: str, api_key: str) -> list[dict]:
     """GET Sonarr's whole series list (it is not paginated). Read-only."""
     url = f"{base_url.rstrip('/')}/api/v3/series"
@@ -884,6 +894,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                          help="Minimum seconds between real requests to the wiki")
 
     batch = subparsers.add_parser("batch", help="Check every film in Radarr's wanted/missing list")
+    batch.add_argument("--all", action="store_true",
+                       help="Check every film in Radarr, also those that already have a file")
     batch.add_argument("--radarr-url", default=DEFAULT_RADARR_URL)
     batch.add_argument("--radarr-config", type=Path, default=DEFAULT_RADARR_CONFIG)
     batch.add_argument("--out", type=Path, default=DEFAULT_RESULTS_PATH, help="Where to write results (JSON)")
@@ -980,7 +992,8 @@ def _check_each(items: list[dict], args: argparse.Namespace, check, extra=lambda
 
 def cmd_batch(args: argparse.Namespace) -> int:
     api_key = read_radarr_api_key(args.radarr_config)
-    movies = fetch_wanted_missing(args.radarr_url, api_key)  # READ-ONLY: GET only, see fetch_wanted_missing
+    fetch = fetch_all_movies if args.all else fetch_wanted_missing  # READ-ONLY: GET only, see both
+    movies = fetch(args.radarr_url, api_key)
     return _check_each(movies, args, lambda movie, client: evaluate_film(
         movie.get("title"), movie.get("originalTitle"), movie.get("year"), client.search, client.get_wikitext))
 
