@@ -1136,6 +1136,29 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         self.assertIn("2", results)
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
 
+    def test_a_stalled_or_dropped_answer_for_one_movie_does_not_abort_the_rest_of_the_batch(self):
+        # Failing mid-read raises TimeoutError or a ConnectionError, not a
+        # URLError: on 2026-11-25 a timeout stopped `batch --all` at film 330 of 514.
+        for failure in (TimeoutError("The read operation timed out"),
+                        ConnectionResetError("Connection reset by peer")):
+            with self.subTest(failure=type(failure).__name__):
+                self.out_path.unlink(missing_ok=True)
+
+                def failing_backend(self, params, failure=failure):
+                    if params.get("srsearch") == "Videodrome":
+                        raise failure
+                    return fake_wiki_backend(search_results={}, pages={})(self, params)
+
+                with patch("dub_check.fetch_wanted_missing", return_value=self._movies()), \
+                     patch.object(WikiClient, "_http_get_json", failing_backend), \
+                     patch("sys.stderr", io.StringIO()):
+                    code = self._run_main(self._argv())
+
+                self.assertEqual(code, 0)
+                results = json.loads(self.out_path.read_text(encoding="utf-8"))
+                self.assertNotIn("1", results)  # left in place for a future retry
+                self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
+
 
 class EvaluateFilmShouldVerifySeriesPagesWhoseInfoboxDiffersFromAFilms(unittest.TestCase):
     """Series pages on doblaje.fandom.com fill the same infobox differently.
