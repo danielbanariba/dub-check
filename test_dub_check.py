@@ -11,6 +11,7 @@ while designing this tool, because the wiki turned out to format its infobox
 two different ways (see FakeWikiWikitextShapes) and a synthetic-only fixture
 would have hidden that.
 """
+import http.client
 import io
 import json
 import tempfile
@@ -1137,10 +1138,12 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
 
     def test_a_stalled_or_dropped_answer_for_one_movie_does_not_abort_the_rest_of_the_batch(self):
-        # Failing mid-read raises TimeoutError or a ConnectionError, not a
-        # URLError: on 2026-11-25 a timeout stopped `batch --all` at film 330 of 514.
+        # Failing mid-read raises TimeoutError, a ConnectionError, or IncompleteRead
+        # when the server closes cleanly mid-body; none is a URLError. On
+        # 2026-11-25 a timeout stopped `batch --all` at film 330 of 514.
         for failure in (TimeoutError("The read operation timed out"),
-                        ConnectionResetError("Connection reset by peer")):
+                        ConnectionResetError("Connection reset by peer"),
+                        http.client.IncompleteRead(b"{\"query\":", 512)):
             with self.subTest(failure=type(failure).__name__):
                 self.out_path.unlink(missing_ok=True)
 
