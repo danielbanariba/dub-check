@@ -36,6 +36,7 @@ from dub_check import (
     WikiClient,
     read_radarr_api_key,
     fetch_wanted_missing,
+    fetch_all_movies,
     format_verdict,
     build_arg_parser,
     main,
@@ -903,6 +904,24 @@ class FetchWantedMissingShouldBeStrictlyReadOnly(unittest.TestCase):
         self.assertEqual(records, [])
 
 
+class FetchAllMoviesShouldReadEveryFilmWithOneGet(unittest.TestCase):
+    def test_reads_every_film_in_radarr_with_a_single_get_and_the_runtime_key(self):
+        captured = []
+        films = [{"id": 7, "title": "Cars 2", "originalTitle": "Cars 2", "year": 2011, "hasFile": True}]
+
+        def fake_urlopen(request, timeout=None):
+            captured.append(request)
+            return io.BytesIO(json.dumps(films).encode("utf-8"))
+
+        with patch("dub_check.urllib.request.urlopen", side_effect=fake_urlopen):
+            records = fetch_all_movies("http://localhost:7878/", "the-real-key")
+
+        self.assertEqual(records, films)
+        self.assertEqual([(r.get_method(), r.full_url) for r in captured],
+                         [("GET", "http://localhost:7878/api/v3/movie")])
+        self.assertEqual(captured[0].get_header("X-api-key"), "the-real-key")
+
+
 class FormatVerdictShouldStateHonestlyWhatWasAndWasNotConfirmed(unittest.TestCase):
     def test_latino_verdict_names_the_confirming_page(self):
         verdict = Verdict("LATINO", "Videodrome: Cuerpos invadidos", ['"Videodrome: Cuerpos invadidos": VERIFIED -> latino'])
@@ -1033,6 +1052,19 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
         results = json.loads(self.out_path.read_text(encoding="utf-8"))
         self.assertEqual(results["1"]["status"], "LATINO")
         self.assertEqual(results["2"]["status"], "NO_ENCONTRADO")
+
+    def test_all_checks_every_film_in_radarr_not_only_the_missing_ones(self):
+        # A film that already has a file is never in wanted/missing, yet the
+        # audio check needs its verdict to know whether a Latino dub exists.
+        with patch("dub_check.fetch_all_movies", return_value=self._movies()) as every, \
+             patch("dub_check.fetch_wanted_missing") as missing, \
+             patch.object(WikiClient, "_http_get_json", self.videodrome_backend):
+            self._run_main(self._argv(["--all"]))
+
+        every.assert_called_once_with("http://localhost:7878", "fake-key-xyz")
+        missing.assert_not_called()
+        results = json.loads(self.out_path.read_text(encoding="utf-8"))
+        self.assertEqual((results["1"]["status"], results["2"]["status"]), ("LATINO", "NO_ENCONTRADO"))
 
     def test_calls_fetch_wanted_missing_exactly_once_and_nothing_else_reads_radarr(self):
         with patch("dub_check.fetch_wanted_missing", return_value=[]) as fake_fetch:

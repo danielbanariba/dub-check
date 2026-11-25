@@ -19,6 +19,9 @@ python3 dub_check.py single "Videodrome" --original-title "Videodrome" --year 19
 # Every film in Radarr's wanted/missing list
 python3 dub_check.py batch
 
+# Every film in Radarr, also those that already have a file
+python3 dub_check.py batch --all
+
 # Every series in Sonarr
 python3 dub_check.py series
 ```
@@ -101,11 +104,12 @@ title-only matches are exactly the coincidence this tool guards against).
 ### Batch (Radarr's wanted list)
 
 ```bash
-python3 dub_check.py batch [--out results.json] [--limit N] [--force]
+python3 dub_check.py batch [--all] [--out results.json] [--limit N] [--force]
 ```
 
 | Flag | Default | Purpose |
 |---|---|---|
+| `--all` | off | Check every film in Radarr (`GET /api/v3/movie`), also those that already have a file, instead of only the wanted/missing list |
 | `--radarr-url` | `http://localhost:7878` | Radarr base URL |
 | `--radarr-config` | `../radarr/config.xml` | Where to read the API key from (see below) |
 | `--out` | `dub-check/results.json` | Where results are written |
@@ -171,9 +175,9 @@ with a verdict, such as choosing a series' quality profile, belongs to
 whatever reads `series-results.json`, never to this tool.
 
 
-Read-only: the only Radarr call this tool makes is
-`GET /api/v3/wanted/missing`. It never monitors, searches, blocklists, or
-edits anything.
+Read-only: the only Radarr calls this tool makes are
+`GET /api/v3/wanted/missing`, and `GET /api/v3/movie` with `batch --all`.
+It never monitors, searches, blocklists, or edits anything.
 
 The API key is read out of Radarr's own `config.xml` **at runtime**, every
 run — never hardcoded into this repository. (A sibling tool in this stack
