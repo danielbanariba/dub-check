@@ -1061,7 +1061,7 @@ class MainBatchModeShouldBeResumableAndReadOnlyTowardRadarr(unittest.TestCase):
              patch.object(WikiClient, "_http_get_json", self.videodrome_backend):
             self._run_main(self._argv(["--all"]))
 
-        every.assert_called_once()
+        every.assert_called_once_with("http://localhost:7878", "fake-key-xyz")
         missing.assert_not_called()
         results = json.loads(self.out_path.read_text(encoding="utf-8"))
         self.assertEqual((results["1"]["status"], results["2"]["status"]), ("LATINO", "NO_ENCONTRADO"))
