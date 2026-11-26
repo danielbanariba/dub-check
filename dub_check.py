@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
 import json
 import re
 import sys
@@ -968,7 +969,13 @@ def _check_each(items: list[dict], args: argparse.Namespace, check, extra=lambda
         year = item.get("year")
         try:
             verdict = check(item, client)
-        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        except (urllib.error.URLError, TimeoutError, ConnectionError,
+                http.client.IncompleteRead) as exc:
+            # URLError (HTTPError included) covers a failed request. An answer
+            # that stalls mid-read raises TimeoutError, a reset one a
+            # ConnectionError, and one the server closes cleanly mid-body
+            # IncompleteRead; none is a URLError. A disk error in the cache
+            # is none of these, and still stops the run.
             # Left out of `results` on purpose: a transient network failure
             # is not a verdict, and omitting the entry means the next run
             # retries this item instead of silently treating it as done.

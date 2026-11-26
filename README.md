@@ -125,7 +125,9 @@ SIN_PAIS / NO_ENCONTRADO summary count.
 **Resumable by default.** A movie already present in the results file is
 skipped on the next run — kill the process partway through ~112 movies and
 re-running picks up where it left off, at no cost to the wiki. Pass
-`--force` to re-check everything anyway.
+`--force` to re-check everything anyway. A movie whose wiki request fails,
+times out or loses its connection gets no verdict: the run goes on with the
+next one and leaves it for the next run.
 
 ### Series (every series in Sonarr)
 
